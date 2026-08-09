@@ -1,0 +1,86 @@
+═══════════════════════════════════════════════════════════
+  Mortal 训练常用命令
+═══════════════════════════════════════════════════════════
+
+─── 环境 ─────────────────────────────────────────────
+conda activate mortal
+cd E:\Program Files\JetBrains\IdeaProjects\Mortal\mortal
+
+
+─── 数据准备 ─────────────────────────────────────────
+
+# 拆分年份数据 (每 10000 文件一个子目录)
+python tools\split_data.py E:/天凤训练数据/2021
+
+─── 训练 ─────────────────────────────────────────────
+
+# 正常训练
+python train.py
+
+─── 监控 ─────────────────────────────────────────────
+cd E:\Program Files\JetBrains\IdeaProjects\Mortal\mortal
+tensorboard --logdir runs
+# 浏览器 http://localhost:6006
+
+# 切换年份
+scripts\switch_year.bat 2021
+
+# 删除缓存重新扫描文件
+rm file_index.pth
+
+# 查看已训练步数
+python -c "import torch; s=torch.load('checkpoints/mortal.pth',weights_only=True,map_location='cpu'); print(s['steps'])"
+
+# GPU 状态
+nvidia-smi
+
+
+─── 测试模型 ─────────────────────────────────────────
+
+# 对战评估 (40 局 ≈ 15 分钟)
+python review\run_test.py 40
+
+# 何切り测试
+Get-Content events.json | python mortal.py 0
+
+
+─── 复盘分析 ─────────────────────────────────────────
+
+# 一键复盘
+scripts\run_review.bat json\test.json 0
+
+# 转 tenhou 格式
+python review\reverse_mjai_review.py json\test.json --tenhou -o json\tenhou.json
+
+
+─── 问题排查 ─────────────────────────────────────────
+
+# checkpoint 损坏恢复
+copy checkpoints\baseline.pth checkpoints\mortal.pth
+
+
+─── 文件结构 ─────────────────────────────────────────
+mortal/
+  tools/             数据工具
+  scripts/           BAT/PS 自动化脚本
+  review/            复盘分析 + 对战测试
+  docs/              文档
+  checkpoints/       模型文件
+
+
+
+# 2025/2026 纯 JSON 转 gzip
+python -c "
+import gzip, os
+for year in ['2025','2026']:
+    d = f'E:/天凤训练数据/{year}'
+    for f in os.listdir(d):
+        if not f.endswith('.mjson'): continue
+        path = os.path.join(d, f)
+        with open(path,'rb') as fh:
+            if fh.read(2) == b'\x1f\x8b': continue
+        tmp = path+'.gz_tmp'
+        with open(path,'rb') as src, gzip.open(tmp,'wb') as dst:
+            dst.write(src.read())
+        os.replace(tmp, path)
+    print(year, 'done')
