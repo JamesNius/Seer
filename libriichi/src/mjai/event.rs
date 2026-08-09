@@ -147,6 +147,9 @@ pub struct Metadata {
     pub shanten: Option<i8>,
     pub at_furiten: Option<bool>,
     pub kan_select: Option<Box<Metadata>>,
+    /// 假想分支：模型首选立直/副露时，假想执行该动作后切牌决策的第一选。
+    /// 仅在 review 场景下填充，对局/训练时为 None。
+    pub followup: Option<Vec<Event>>,
 }
 
 #[derive(Serialize, Deserialize)]

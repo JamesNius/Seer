@@ -186,13 +186,32 @@ class Brain(nn.Module):
         return self.train(self.training)
 
 class AuxNet(nn.Module):
-    def __init__(self, dims=None):
+    def __init__(self, dims=None, input_size=1024):
         super().__init__()
         self.dims = dims
-        self.net = nn.Linear(1024, sum(dims), bias=False)
+        self.net = nn.Linear(input_size, sum(dims), bias=False)
 
     def forward(self, x):
         return self.net(x).split(self.dims, dim=-1)
+
+class OracleNet(nn.Module):
+    """透视辅助头: 从 phi 预测三家手牌构成/赤牌/向听/待牌/振听 (v4 标签)。"""
+
+    DIMS = (510, 9, 21, 102, 3)  # cnt / aka / shanten / wait / furiten
+
+    def __init__(self, input_size=1024):
+        super().__init__()
+        self.net = nn.Linear(input_size, sum(self.DIMS), bias=False)
+
+    def forward(self, phi):
+        cnt, aka, shan, wait, furi = self.net(phi).split(self.DIMS, dim=-1)
+        return (
+            cnt.unflatten(-1, (3, 34, 5)),  # 3家 × 34牌 × 张数(0-4)
+            aka.unflatten(-1, (3, 3)),      # 3家 × (5mr,5pr,5sr)
+            shan.unflatten(-1, (3, 7)),     # 3家 × 向听(0-6)
+            wait.unflatten(-1, (3, 34)),    # 3家 × 34待牌
+            furi,                           # (B, 3) 振听
+        )
 
 class DQN(nn.Module):
     def __init__(self, *, version=1):

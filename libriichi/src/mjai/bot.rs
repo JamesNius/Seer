@@ -39,6 +39,32 @@ impl Bot {
     fn react_py(&mut self, line: &str, can_act: bool, py: Python<'_>) -> Result<Option<String>> {
         py.allow_threads(move || self.react(line, can_act))
     }
+
+    /// 返回 agent 当前待取用的假想分支样本数（不清空）。
+    /// review server Pass 1 按此对齐 record 的 followup 样本数。
+    #[pyo3(name = "pending_followups_count")]
+    fn pending_followups_count_py(&self) -> usize {
+        self.agent.pending_followups_count()
+    }
+
+    /// 清空假想分支记录（review server Pass 3 对齐后调用）。
+    #[pyo3(name = "clear_pending_followups")]
+    fn clear_pending_followups_py(&self) {
+        self.agent.clear_pending_followups();
+    }
+
+    /// 是否有假想分支（Pass 3 用：有则 ReplayEngine 需剥离 followup 样本）。
+    #[pyo3(name = "has_pending_followups")]
+    fn has_pending_followups_py(&self) -> bool {
+        self.agent.has_pending_followups()
+    }
+
+    /// record_mode 结束（Pass 1 录完）后调用：等所有编码任务完成，
+    /// 返回按 record 分组的 (obs, masks, invisible) 列表供 Pass 2 批量推理。
+    #[pyo3(name = "flush_encode")]
+    fn flush_encode_py(&mut self) -> Result<Py<PyAny>> {
+        self.agent.flush_encode()
+    }
 }
 
 impl Bot {
