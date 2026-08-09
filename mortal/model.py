@@ -186,13 +186,31 @@ class Brain(nn.Module):
         return self.train(self.training)
 
 class AuxNet(nn.Module):
-    def __init__(self, dims=None):
+    def __init__(self, dims=None, input_size=1024):
         super().__init__()
         self.dims = dims
-        self.net = nn.Linear(1024, sum(dims), bias=False)
+        self.net = nn.Linear(input_size, sum(dims), bias=False)
 
     def forward(self, x):
         return self.net(x).split(self.dims, dim=-1)
+
+class OracleNet(nn.Module):
+
+    DIMS = (510, 9, 21, 102, 3)
+
+    def __init__(self, input_size=1024):
+        super().__init__()
+        self.net = nn.Linear(input_size, sum(self.DIMS), bias=False)
+
+    def forward(self, phi):
+        cnt, aka, shan, wait, furi = self.net(phi).split(self.DIMS, dim=-1)
+        return (
+            cnt.unflatten(-1, (3, 34, 5)),
+            aka.unflatten(-1, (3, 3)),
+            shan.unflatten(-1, (3, 7)),
+            wait.unflatten(-1, (3, 34)),
+            furi,
+        )
 
 class DQN(nn.Module):
     def __init__(self, *, version=1):

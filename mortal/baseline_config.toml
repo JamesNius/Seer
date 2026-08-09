@@ -1,0 +1,7 @@
+[control]
+state_file = 'dummy.pth'
+version = 4
+
+[resnet]
+conv_channels = 192
+num_blocks = 40

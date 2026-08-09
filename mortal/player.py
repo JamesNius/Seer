@@ -42,7 +42,7 @@ class TestPlayer:
         self.chal_version = config['control']['version']
         self.log_dir = path.abspath(config['test_play']['log_dir'])
 
-    def test_play(self, seed_count, mortal, dqn, device):
+    def test_play(self, seed_count, mortal, dqn, device, seed_key=None):
         torch.backends.cudnn.benchmark = False
         engine_chal = MortalEngine(
             mortal,
@@ -57,6 +57,9 @@ class TestPlayer:
         if path.isdir(self.log_dir):
             shutil.rmtree(self.log_dir)
 
+        if seed_key is None:
+            seed_key = secrets.randbits(64)
+
         env = OneVsThree(
             disable_progress_bar = False,
             log_dir = self.log_dir,
@@ -64,7 +67,7 @@ class TestPlayer:
         env.py_vs_py(
             challenger = engine_chal,
             champion = self.baseline_engine,
-            seed_start = (10000, 0x2000),
+            seed_start = (10000, seed_key),
             seed_count = seed_count,
         )
 

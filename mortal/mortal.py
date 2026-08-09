@@ -5,7 +5,7 @@ import sys
 import json
 import torch
 from datetime import datetime, timezone
-from model import Brain, DQN, GRP
+from model import Brain, DQN, GRP, OracleNet
 from engine import MortalEngine
 from common import filtered_trimmed_lines
 from libriichi.mjai import Bot
@@ -43,9 +43,15 @@ def main():
     mortal.load_state_dict(state['mortal'])
     dqn.load_state_dict(state['current_dqn'])
 
+    oracle_net = None
+    if 'oracle_net' in state:
+        oracle_net = OracleNet(input_size=512 if version == 1 else 1024).eval()
+        oracle_net.load_state_dict(state['oracle_net'])
+
     engine = MortalEngine(
         mortal,
         dqn,
+        oracle_net = oracle_net,
         version = version,
         is_oracle = False,
         device = device,
@@ -63,6 +69,12 @@ def main():
             logs.append(line)
 
         if reaction := bot.react(line):
+            if oracle_net is not None and engine.oracle_log:
+                oracle_data = engine.oracle_log[-1] if engine.oracle_log else None
+                if oracle_data:
+                    obj = json.loads(reaction)
+                    obj.setdefault('meta', {})['oracle'] = oracle_data
+                    reaction = json.dumps(obj)
             print(reaction, flush=True)
         elif review_mode:
             print('{"type":"none","meta":{"mask_bits":0}}', flush=True)

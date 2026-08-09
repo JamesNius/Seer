@@ -1,0 +1,24 @@
+[control]
+version = 4
+state_file = 'checkpoints/mortal.pth'
+tensorboard_dir = 'runs'
+
+[online.remote]
+host = '127.0.0.1'
+port = 5000
+
+[online.server]
+buffer_dir = 'buffer'
+drain_dir = 'drain'
+sample_reuse_rate = 0
+sample_reuse_threshold = 0
+capacity = 1600
+force_sequential = false
+
+[env]
+pts = [90, 45, 0, -135]
+gamma = 0.95
+
+[resnet]
+conv_channels = 192
+num_blocks = 40

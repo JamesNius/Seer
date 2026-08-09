@@ -34,6 +34,10 @@ repeats = 1
 games = 3000
 log_dir = '/path/to/test_play'
 
+[review]
+enable_oracle = false
+oracle_state_file = '/path/to/oracle_frozen.pth'
+
 [dataset]
 globs = ['/path/to/dataset/**/*.json.gz']
 file_index = '/path/to/file_index.pth'
@@ -58,6 +62,7 @@ min_q_weight = 5
 
 [aux]
 next_rank_weight = 0.2
+oracle_weight = 0.0
 
 [freeze_bn]
 # `true` in online training

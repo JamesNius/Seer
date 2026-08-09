@@ -1416,3 +1416,57 @@ fn chi_at_0_shanten() {
     assert!(ps.at_furiten);
     assert!(!ps.has_next_shanten_discard);
 }
+
+#[test]
+fn rule_based_agari_ron_target_awareness() {
+    let log_ron_over30k = r#"
+        {"type":"start_kyoku","bakaze":"S","dora_marker":"E","kyoku":4,"honba":0,"kyotaku":0,"oya":3,"scores":[22500,35000,25000,33000],"tehais":[["2m","3m","4m","5m","6m","7m","7p","8p","9p","2s","2s","3s","4s"],["1m","9m","1p","9p","1s","9s","E","S","W","N","P","F","C"],["1m","9m","1p","9p","1s","9s","E","S","W","N","P","F","C"],["1m","9m","1p","9p","1s","9s","E","S","W","N","P","F","C"]]}
+        {"type":"tsumo","actor":3,"pai":"5p"}
+        {"type":"dahai","actor":3,"pai":"5p","tsumogiri":true}
+        {"type":"tsumo","actor":0,"pai":"W"}
+        {"type":"dahai","actor":0,"pai":"W","tsumogiri":true}
+        {"type":"tsumo","actor":1,"pai":"5s"}
+        {"type":"dahai","actor":1,"pai":"5s","tsumogiri":true}
+    "#;
+    let ps = PlayerState::from_log(0, log_ron_over30k);
+    assert!(ps.last_cans.can_ron_agari);
+    assert!(!ps.rule_based_agari(), "荣和过三万家仍四位，应拒和");
+    
+    let log_ron_third = r#"
+        {"type":"start_kyoku","bakaze":"S","dora_marker":"E","kyoku":4,"honba":0,"kyotaku":0,"oya":3,"scores":[22500,35000,25000,33000],"tehais":[["2m","3m","4m","5m","6m","7m","6p","7p","8p","2s","2s","3s","4s"],["1m","9m","1p","9p","1s","9s","E","S","W","N","P","F","C"],["1m","9m","1p","9p","1s","9s","E","S","W","N","P","F","C"],["1m","9m","1p","9p","1s","9s","E","S","W","N","P","F","C"]]}
+        {"type":"tsumo","actor":3,"pai":"5p"}
+        {"type":"dahai","actor":3,"pai":"5p","tsumogiri":true}
+        {"type":"tsumo","actor":0,"pai":"W"}
+        {"type":"dahai","actor":0,"pai":"W","tsumogiri":true}
+        {"type":"tsumo","actor":1,"pai":"P"}
+        {"type":"dahai","actor":1,"pai":"P","tsumogiri":true}
+        {"type":"tsumo","actor":2,"pai":"5s"}
+        {"type":"dahai","actor":2,"pai":"5s","tsumogiri":true}
+    "#;
+    let ps = PlayerState::from_log(0, log_ron_third);
+    eprintln!("scores       = {:?}", ps.scores);
+    eprintln!("rank         = {}", ps.rank);
+    eprintln!("is_all_last  = {}", ps.is_all_last);
+    eprintln!("oya(rel)     = {}", ps.oya);
+    eprintln!("can_ron      = {}", ps.last_cans.can_ron_agari);
+    eprintln!("target_actor = {}", ps.last_cans.target_actor);
+    let pt = ps.agari_points(true, &[]).unwrap();
+    eprintln!("point        = ron {} / tsumo_ko {} / tsumo_oya {}", pt.ron, pt.tsumo_ko, pt.tsumo_oya);
+    let mut exp = ps.scores;
+    exp[0] += pt.ron;
+    exp[2] -= pt.ron;
+    eprintln!("exp_scores   = {:?} -> rank {}", exp, ps.get_rank(exp));
+    eprintln!("rule_based_agari = {}", ps.rule_based_agari());
+    assert!(ps.last_cans.can_ron_agari);
+    assert!(ps.rule_based_agari(), "荣和三位可逆转，应放行");
+    
+    let log_tsumo = r#"
+        {"type":"start_kyoku","bakaze":"S","dora_marker":"E","kyoku":4,"honba":0,"kyotaku":0,"oya":3,"scores":[22500,35000,25000,33000],"tehais":[["2m","3m","4m","5m","6m","7m","6p","7p","8p","2s","2s","3s","4s"],["1m","9m","1p","9p","1s","9s","E","S","W","N","P","F","C"],["1m","9m","1p","9p","1s","9s","E","S","W","N","P","F","C"],["1m","9m","1p","9p","1s","9s","E","S","W","N","P","F","C"]]}
+        {"type":"tsumo","actor":3,"pai":"5p"}
+        {"type":"dahai","actor":3,"pai":"5p","tsumogiri":true}
+        {"type":"tsumo","actor":0,"pai":"5s"}
+    "#;
+    let ps = PlayerState::from_log(0, log_tsumo);
+    assert!(ps.last_cans.can_tsumo_agari);
+    assert!(ps.rule_based_agari(), "自摸可逆转，应放行");
+}

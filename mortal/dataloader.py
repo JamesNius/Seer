@@ -7,6 +7,19 @@ from reward_calculator import RewardCalculator
 from libriichi.dataset import GameplayLoader
 from config import config
 
+def decode_invisible_obs(inv):
+    assert inv.shape == (217, 34), f'unexpected invisible_obs shape {inv.shape}'
+    cnt = np.empty((3, 35), dtype=np.int64)
+    bin_ = np.empty((3, 38), dtype=np.float32)
+    for k in range(3):
+        b = 17 * k
+        cnt[k, :34] = np.rint(inv[b:b + 4].sum(0)).astype(np.int64)
+        cnt[k, 34] = int(inv[b + 7:b + 14, 0].argmax())
+        bin_[k, :34] = inv[b + 15]
+        bin_[k, 34:37] = inv[b + 4:b + 7, 0]
+        bin_[k, 37] = inv[b + 16, 0]
+    return cnt, bin_
+
 class FileDatasetsIter(IterableDataset):
     def __init__(
         self,
@@ -21,6 +34,7 @@ class FileDatasetsIter(IterableDataset):
         num_epochs = 1,
         enable_augmentation = False,
         augmented_first = False,
+        point_weight = 0.0,
     ):
         super().__init__()
         self.version = version
@@ -34,6 +48,7 @@ class FileDatasetsIter(IterableDataset):
         self.num_epochs = num_epochs
         self.enable_augmentation = enable_augmentation
         self.augmented_first = augmented_first
+        self.point_weight = point_weight    # ← 新增
         self.iterator = None
 
     def build_iter(self):
@@ -41,7 +56,7 @@ class FileDatasetsIter(IterableDataset):
         self.grp = GRP(**config['grp']['network'])
         grp_state = torch.load(config['grp']['state_file'], weights_only=True, map_location=torch.device('cpu'))
         self.grp.load_state_dict(grp_state['model'])
-        self.reward_calc = RewardCalculator(self.grp, self.pts)
+        self.reward_calc = RewardCalculator(self.grp, self.pts, point_weight=self.point_weight)
 
         for _ in range(self.num_epochs):
             yield from self.load_files(self.augmented_first)
@@ -99,10 +114,10 @@ class FileDatasetsIter(IterableDataset):
 
                 grp_feature = grp.take_feature()
                 rank_by_player = grp.take_rank_by_player()
-                kyoku_rewards = self.reward_calc.calc_delta_pt(player_id, grp_feature, rank_by_player)
-                assert len(kyoku_rewards) >= at_kyoku[-1] + 1 # usually they are equal, unless there is no action in the last kyoku
-
                 final_scores = grp.take_final_scores()
+                kyoku_rewards = self.reward_calc.calc_rewards(player_id, grp_feature, rank_by_player, final_scores)
+                assert len(kyoku_rewards) >= at_kyoku[-1] + 1
+
                 scores_seq = np.concatenate((grp_feature[:, 3:] * 1e4, [final_scores]))
                 rank_by_player_seq = (-scores_seq).argsort(-1, kind='stable').argsort(-1, kind='stable')
                 player_ranks = rank_by_player_seq[:, player_id]
@@ -122,7 +137,7 @@ class FileDatasetsIter(IterableDataset):
                         player_ranks[at_kyoku[i] + 1],
                     ]
                     if self.oracle:
-                        entry.insert(1, invisible_obs[i])
+                        entry.extend(decode_invisible_obs(invisible_obs[i]))
                     self.buffer.append(entry)
 
     def __iter__(self):

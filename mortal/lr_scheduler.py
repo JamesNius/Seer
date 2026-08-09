@@ -4,7 +4,7 @@ from torch.optim.lr_scheduler import LambdaLR
 class LinearWarmUpCosineAnnealingLR(LambdaLR):
     def __init__(self, optimizer, *, peak, final, warm_up_steps, max_steps, init=1e-8, offset=0, epoch_size=0, **kwargs):
         assert peak >= final >= init >= 0
-        assert max_steps >= warm_up_steps
+        assert max_steps >= warm_up_steps or max_steps == 0
         self.init = init
         self.peak = peak
         self.final = final
@@ -22,7 +22,9 @@ class LinearWarmUpCosineAnnealingLR(LambdaLR):
             steps %= self.epoch_size
         if self.warm_up_steps > 0 and steps < self.warm_up_steps:
             return self.init + (self.peak - self.init) / self.warm_up_steps * steps
-        if steps < self.max_steps:
+        if self.max_steps == 0 or steps < self.max_steps:
+            if self.max_steps == 0:
+                return self.peak
             cos_steps = steps - self.warm_up_steps
             cos_max_steps = self.max_steps - self.warm_up_steps
             return self.final + 0.5 * (self.peak - self.final) * (1 + math.cos(cos_steps / cos_max_steps * math.pi))

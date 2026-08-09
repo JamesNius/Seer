@@ -39,6 +39,26 @@ impl Bot {
     fn react_py(&mut self, line: &str, can_act: bool, py: Python<'_>) -> Result<Option<String>> {
         py.allow_threads(move || self.react(line, can_act))
     }
+    
+    #[pyo3(name = "pending_followups_count")]
+    fn pending_followups_count_py(&self) -> usize {
+        self.agent.pending_followups_count()
+    }
+
+    #[pyo3(name = "clear_pending_followups")]
+    fn clear_pending_followups_py(&self) {
+        self.agent.clear_pending_followups();
+    }
+    
+    #[pyo3(name = "has_pending_followups")]
+    fn has_pending_followups_py(&self) -> bool {
+        self.agent.has_pending_followups()
+    }
+
+    #[pyo3(name = "flush_encode")]
+    fn flush_encode_py(&mut self) -> Result<Py<PyAny>> {
+        self.agent.flush_encode()
+    }
 }
 
 impl Bot {

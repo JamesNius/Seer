@@ -1,5 +1,6 @@
 .vscode
 __pycache__
+.idea/
 
 /target
 *.pyd
@@ -8,7 +9,25 @@ __pycache__
 *.so
 *.pth
 
+# 训练产物
+runs/
+selfplay_data/
+test_play_logs/
+1v3_logs/
+grp_runs/
+checkpoints/
+file_index.pth
+grp_file_index.pth
+
 .ipynb_checkpoints
 *.ipynb
 
 /_draft
+
+/mortal/json/
+
+# 本地构建/测试产物，不提交
+libriichi/dist_local/
+mortal/.claude/
+mortal/ab_new/
+mortal/ab_old/

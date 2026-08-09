@@ -147,6 +147,7 @@ pub struct Metadata {
     pub shanten: Option<i8>,
     pub at_furiten: Option<bool>,
     pub kan_select: Option<Box<Metadata>>,
+    pub followup: Option<Vec<Event>>,
 }
 
 #[derive(Serialize, Deserialize)]
