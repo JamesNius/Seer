@@ -2,10 +2,11 @@ import torch
 import numpy as np
 
 class RewardCalculator:
-    def __init__(self, grp=None, pts=None, uniform_init=False):
+    def __init__(self, grp=None, pts=None, uniform_init=False, point_weight=0.0):
         self.device = torch.device('cpu')
         self.grp = grp.to(self.device).eval()
         self.uniform_init = uniform_init
+        self.point_weight = float(point_weight)          # ← 新增
 
         pts = pts or [3, 1, -1, -3]
         self.pts = torch.tensor(pts, dtype=torch.float64, device=self.device)
@@ -41,3 +42,11 @@ class RewardCalculator:
         seq = np.concatenate((grp_feature[:, 3 + player_id] * 1e4, [final_scores[player_id]]))
         delta_points = seq[1:] - seq[:-1]
         return delta_points
+
+    # ↓ 新增：顺位pts差分 + w × 素点差分(万点归一)
+    def calc_rewards(self, player_id, grp_feature, rank_by_player, final_scores):
+        rewards = self.calc_delta_pt(player_id, grp_feature, rank_by_player)
+        if self.point_weight > 0:
+            delta_points = self.calc_delta_points(player_id, grp_feature, final_scores)
+            rewards = rewards + self.point_weight * delta_points / 1e4
+        return rewards
