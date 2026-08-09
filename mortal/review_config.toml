@@ -1,0 +1,144 @@
+[control]
+version = 4
+online = false
+state_file = 'checkpoints/mortal.pth'
+best_state_file = 'checkpoints/best.pth'
+tensorboard_dir = 'runs'
+device = 'cuda'
+enable_cudnn_benchmark = true
+enable_amp = true
+enable_compile = false
+batch_size = 1024
+opt_step_every = 1
+save_every = 400
+test_every = 1500000
+submit_every = 400
+
+[test_play]
+games = 1000
+log_dir = 'test_play_logs'
+
+[review]
+enable_oracle = true
+enable_value_dist = true
+value_dist_file = 'checkpoints/value_dist.pth'
+# 冻结后 oracle 头随共享 backbone 漂移，推理必须读快照（step 1,065,600）
+oracle_state_file = 'checkpoints/oracle_frozen_1065600.pt'
+
+[env]
+gamma = 1.0
+pts = [6, 3, 0, -12]
+point_weight = 0.15
+
+[resnet]
+conv_channels = 192
+num_blocks = 40
+
+[cql]
+min_q_weight = 5
+
+[aux]
+next_rank_weight = 0.2
+# oracle 已冻结（step 1,065,600）：权重置 0，前向跳过、不反传。
+# 若需恢复联合训练，改回 >0 并到 train.py 取消 oracle 参数的 requires_grad_(False)。
+oracle_weight = 0.0
+
+[freeze_bn]
+mortal = false
+
+[optim]
+eps = 1e-8
+betas = [0.9, 0.999]
+weight_decay = 0.1
+max_grad_norm = 5.0
+
+[optim.scheduler]
+peak = 2e-4
+final = 2e-5
+warm_up_steps = 2000
+max_steps = 0
+
+[dataset]
+globs = [
+    'E:/天凤训练数据/2016/*.mjson',
+    'E:/天凤训练数据/2017/*.mjson',
+]
+file_index = 'file_index.pth'
+file_batch_size = 15
+reserve_ratio = 0.0
+num_workers = 1
+player_names_files = []
+num_epochs = 1
+enable_augmentation = false
+augmented_first = false
+
+[baseline.train]
+device = 'cuda'
+enable_compile = false
+state_file = 'checkpoints/baseline.pth'
+
+[baseline.test]
+device = 'cuda'
+enable_compile = false
+state_file = 'checkpoints/baseline.pth'
+
+[online]
+history_window = 50
+enable_compile = false
+
+[1v3]
+seed_key = -1
+games_per_iter = 2000
+iters = 500
+log_dir = '1v3_logs'
+
+[1v3.challenger]
+device = 'cuda'
+name = 'mortal'
+state_file = 'checkpoints/mortal.pth'
+stochastic_latent = false
+enable_compile = false
+enable_amp = true
+enable_rule_based_agari_guard = true
+
+[1v3.champion]
+device = 'cuda'
+name = 'baseline'
+state_file = 'checkpoints/baseline.pth'
+stochastic_latent = false
+enable_compile = false
+enable_amp = true
+enable_rule_based_agari_guard = true
+
+[1v3.akochan]
+enabled = false
+dir = ''
+tactics = ''
+
+[grp]
+state_file = 'grp.pth'
+
+[grp.network]
+hidden_size = 64
+num_layers = 2
+
+[grp.control]
+device = 'cuda'
+enable_cudnn_benchmark = false
+tensorboard_dir = 'grp_runs'
+batch_size = 512
+save_every = 2000
+val_steps = 400
+
+[grp.dataset]
+train_globs = [
+    'E:/天凤训练数据/2021/**/*.mjson',
+    'E:/天凤训练数据/2022/**/*.mjson',
+    'E:/天凤训练数据/2023/**/*.mjson',
+]
+val_globs = ['E:/天凤训练数据/2024/**/*.mjson']
+file_index = 'grp_file_index.pth'
+file_batch_size = 10
+
+[grp.optim]
+lr = 1e-5
