@@ -149,6 +149,7 @@ fn libriichi(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
 
     consts::register_module(py, name, m)?;
+    algo::py_agari::register_module(py, name, m)?;
     state::register_module(py, name, m)?;
     dataset::register_module(py, name, m)?;
     arena::register_module(py, name, m)?;
