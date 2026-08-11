@@ -114,7 +114,12 @@ class VisibleTracker:
         return None   # 未定, 调用方用 vd_shan[0]
 
     def visible34(self):
-        """每牌已见张数(34维) = net_kawa + meld + ind + 四家暗手。"""
+        """每牌已见张数(34维) = net_kawa + meld + ind + 自家暗手。
+
+        只算"模型能观测到的"部分可观测信息: 河 + 副露 + 指示 + 自家手牌。
+        不包含别家暗手——模型看不到别家手牌, clamp 若用上帝视角(四家手牌)
+        会把模型合理的高山存预测错误清零(实测 5s raw=2.28 被砍到 0,
+        Σ 从 77 压到 62)。"""
         net_kawa = self.kawa_pool - self.called_pai
         meld = Counter()
         ks = self.tracker.ks
@@ -129,10 +134,10 @@ class VisibleTracker:
             for m in h.minkans: meld[tile_id(m)] += 4
             for m in h.ankans: meld[tile_id(m)] += 4
         ind = Counter(tile_id(d) for d in ks.dora_markers)
+        # 只统计自家暗手(viewer), 不统计别家——clamp 用部分可观测口径
         hands = [0] * 34
-        for p in range(4):
-            for x in ks.hands[p].menzen:
-                hands[tile_id(x)] += 1
+        for x in ks.hands[self.viewer].menzen:
+            hands[tile_id(x)] += 1
         return [net_kawa[i] + meld[i] + ind[i] + hands[i] for i in range(34)]
 
 
