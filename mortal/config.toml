@@ -1,7 +1,7 @@
 [control]
 version = 4
 online = false
-state_file = 'checkpoints/mortal.pth'
+state_file = 'checkpoints/seer.1.0.收敛版.pth'
 best_state_file = 'checkpoints/best.pth'
 tensorboard_dir = 'runs'
 device = 'cuda'
