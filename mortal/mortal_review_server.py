@@ -226,43 +226,21 @@ class MortalReviewServer:
     def __init__(self, port: int = DEFAULT_PORT):
         self.port = port
         self.device = torch.device("cuda")
-        self.engine: MortalEngine | None = None
+        self.engines: dict[str, MortalEngine] = {}
         self.grp: GRP | None = None
         self.value_dist = None
-        self.tag: str = ""
+        self.tags: dict[str, str] = {}
         self.version: int = 0
 
     def load_models(self) -> None:
         logging.info("Loading Mortal models...")
-        state = torch.load(
-            config["control"]["state_file"],
-            weights_only=True,
-            map_location=self.device,
-        )
-        cfg = state["config"]
-        self.version = cfg["control"].get("version", 1)
-        num_blocks = cfg["resnet"]["num_blocks"]
-        conv_channels = cfg["resnet"]["conv_channels"]
-
-        if "tag" in state:
-            self.tag = state["tag"]
-        else:
-            t = datetime.fromtimestamp(state["timestamp"], tz=timezone.utc).strftime(
-                "%y%m%d%H"
-            )
-            self.tag = f"mortal{self.version}-b{num_blocks}c{conv_channels}-t{t}"
-
-        brain = Brain(
-            version=self.version, num_blocks=num_blocks, conv_channels=conv_channels
-        ).eval()
-        dqn = DQN(version=self.version).eval()
-        brain.load_state_dict(state["mortal"])
-        dqn.load_state_dict(state["current_dqn"])
 
         # ── oracle（可选）：加载冻结快照，config [review] 控制 ──
         # 自 step 1,065,600 起 oracle 与主网解耦：训练中 oracle 头随共享 backbone 漂移，
         # 当前 checkpoint 里的 oracle_net 已不再对齐，只能读快照。
+        # oracle 是共享组件：多模型共用同一份，不随主模型变。
         oracle_net = None
+        self.version = config["control"].get("version", 1)
         if config.get("review", {}).get("enable_oracle", False):
             oracle_state_file = config["review"].get(
                 "oracle_state_file", config["control"]["state_file"]
@@ -278,21 +256,7 @@ class MortalReviewServer:
             oracle_net.load_state_dict(oracle_state["oracle_net"])
             logging.info(f"Oracle net loaded from {oracle_state_file}")
 
-        self.engine = MortalEngine(
-            brain,
-            dqn,
-            oracle_net=oracle_net,
-            version=self.version,
-            is_oracle=False,
-            device=self.device,
-            enable_amp=False,
-            enable_quick_eval=False,
-            enable_rule_based_agari_guard=True,
-            name="mortal",
-            rayon_threads=config.get("review", {}).get("rayon_threads"),
-        )
-
-        # GRP 模型（用于 phi_matrix）
+        # GRP 模型（用于 phi_matrix，共享一份）
         grp = GRP(**config["grp"]["network"])
         grp_state = torch.load(
             config["grp"]["state_file"],
@@ -303,16 +267,60 @@ class MortalReviewServer:
         grp.to(self.device)
         self.grp = grp
 
-        # ── 他家打点分布模型（可选，完全独立）：config [review] enable_value_dist 控制 ──
+        # ── 他家打点分布模型（可选，完全独立，共享一份）──
         self.value_dist = load_predictor(config, self.device)
         if self.value_dist is not None:
             logging.info("Value-dist net loaded")
         else:
             logging.info("Value-dist net disabled or checkpoint missing")
 
-        logging.info(f"Mortal models loaded. tag={self.tag}")
+        # ── 主模型：遍历 [review.models] 加载多个 Brain+DQN ──
+        models_cfg = config.get("review", {}).get("models", {})
+        if not models_cfg:
+            # 兼容旧配置：无 [review.models] 时回退到单模型
+            models_cfg = {"Seer": config["control"]["state_file"]}
+        for name, state_file in models_cfg.items():
+            state = torch.load(state_file, weights_only=True, map_location=self.device)
+            cfg = state["config"]
+            version = cfg["control"].get("version", 1)
+            num_blocks = cfg["resnet"]["num_blocks"]
+            conv_channels = cfg["resnet"]["conv_channels"]
 
-        # 预热：用假数据跑一次典型 batch 形状，让 cuDNN 提前完成卷积算法调优，
+            if "tag" in state:
+                tag = state["tag"]
+            else:
+                t = datetime.fromtimestamp(state["timestamp"], tz=timezone.utc).strftime(
+                    "%y%m%d%H"
+                )
+                tag = f"mortal{version}-b{num_blocks}c{conv_channels}-t{t}"
+
+            brain = Brain(
+                version=version, num_blocks=num_blocks, conv_channels=conv_channels
+            ).eval()
+            dqn = DQN(version=version).eval()
+            brain.load_state_dict(state["mortal"])
+            dqn.load_state_dict(state["current_dqn"])
+
+            engine = MortalEngine(
+                brain,
+                dqn,
+                oracle_net=oracle_net,
+                version=version,
+                is_oracle=False,
+                device=self.device,
+                enable_amp=False,
+                enable_quick_eval=False,
+                enable_rule_based_agari_guard=True,
+                name=name,
+                rayon_threads=config.get("review", {}).get("rayon_threads"),
+            )
+            self.engines[name] = engine
+            self.tags[name] = tag
+            logging.info(f"Model [{name}] loaded from {state_file} (tag={tag})")
+
+        logging.info(f"Mortal models loaded. engines={list(self.engines.keys())}")
+
+        # 预热：对每个 engine 用假数据跑一次典型 batch 形状，让 cuDNN 提前完成卷积算法调优
         try:
             from libriichi.consts import obs_shape as OBS_SHAPE
 
@@ -320,9 +328,10 @@ class MortalReviewServer:
             shape = OBS_SHAPE(self.version)            # 不拆包，整体当形状用
             fake_obs = [np.zeros(shape, dtype=np.float32)] * BATCH_CHUNK
             fake_masks = [np.ones((46,), dtype=bool)] * BATCH_CHUNK
-            self.engine.react_batch(fake_obs, fake_masks, None)
-            self.engine.oracle_log.clear()   # 清掉预热产生的 oracle 垃圾数据
-            logging.info(f"Warm-up done (obs shape: {shape})")
+            for engine in self.engines.values():
+                engine.react_batch(fake_obs, fake_masks, None)
+                engine.oracle_log.clear()   # 清掉预热产生的 oracle 垃圾数据
+            logging.info(f"Warm-up done ({len(self.engines)} engines, obs shape: {shape})")
         except Exception:
             logging.warning(f"Warm-up failed (non-fatal):\n{traceback.format_exc()}")
 
@@ -338,16 +347,22 @@ class MortalReviewServer:
             line = rf.readline()
             if not line:
                 return
-            player_id = int(line.strip())
+            # 协议第一行: "player_id [model]"。空格分隔，缺省 model 用 Seer（向后兼容旧客户端）。
+            parts = line.strip().split()
+            player_id = int(parts[0])
             if player_id not in range(4):
                 raise ValueError(f"Invalid player_id: {player_id}")
+            model = parts[1] if len(parts) > 1 else "Seer"
+            if model not in self.engines:
+                raise ValueError(f"Unknown model: {model} (available: {list(self.engines.keys())})")
+            engine = self.engines[model]
 
             all_lines = [ln.strip() for ln in rf if ln.strip()]
 
             # ============ Pass 1: 录制 ============
             # 插桩: init = Bot/引擎创建, loop = 逐事件 react + obs 编码
             t_init0 = time.time()
-            record_engine = RecordEngine(self.engine)
+            record_engine = RecordEngine(engine)
             # record_mode：Rust 端 set_scene 照常异步编码，但 get_reaction 不 evaluate、
             # 不等每决策点的编码完成（省掉串行 wait）；Pass 1 结束 flush_encode 一次性等完。
             record_engine.record_mode = os.environ.get("RECORD_MODE", "1") == "1"
@@ -369,7 +384,7 @@ class MortalReviewServer:
             # GPU 全局锁：Mortal 推理 + value_dist + oracle_log 共享引擎状态,
             # 多连接并发时必须串行(clear 也必须在锁内, 防串谱)。
             with (_GPU_LOCK if not _NO_GPU_LOCK else nullcontext()):
-                self.engine.oracle_log.clear()   # 每连接清零，防止串谱
+                engine.oracle_log.clear()   # 每连接清零，防止串谱
 
                 # 关键：暗杠/加杠决策点一次 react_batch 带 2 个样本（kan 候选 + 主决策），
                 # 不能假设 batch=1。先记录每条 record 的样本数，展平后推理，再按原样分组。
@@ -385,7 +400,7 @@ class MortalReviewServer:
                 # 逐样本结果
                 sample_actions, sample_q, sample_masks, sample_greedy = [], [], [], []
                 for i in range(0, len(all_obs), BATCH_CHUNK):
-                    actions, q_out, masks_out, is_greedy = self.engine.react_batch(
+                    actions, q_out, masks_out, is_greedy = engine.react_batch(
                         all_obs[i : i + BATCH_CHUNK],
                         all_masks[i : i + BATCH_CHUNK],
                         all_inv[i : i + BATCH_CHUNK] if all_inv is not None else None,
@@ -410,7 +425,7 @@ class MortalReviewServer:
 
                 # oracle 侧信道：同样按 record 分组（oracle_flat 与 sample_* 逐样本对齐）
                 oracle_groups = []
-                oracle_flat = self.engine.oracle_log
+                oracle_flat = engine.oracle_log
                 if oracle_flat:
                     pos = 0
                     for c in counts:
@@ -470,7 +485,7 @@ class MortalReviewServer:
 
             # ============ Pass 3: 重放 ============
             t_post0 = time.time()
-            replay_engine = ReplayEngine(self.engine, flat_results)
+            replay_engine = ReplayEngine(engine, flat_results)
             bot = Bot(replay_engine, player_id)
             vt = VisibleTracker(player_id)   # 同步维护可见牌(与提取管线同口径)
             t_py = 0.0
@@ -574,7 +589,7 @@ class MortalReviewServer:
                 matrix = self.grp.calc_matrix(logits)
 
             wf.write(json.dumps({
-                "model_tag": self.tag,
+                "model_tag": self.tags[model],
                 "phi_matrix": matrix.tolist(),
                 "has_oracle": bool(oracle_groups),
                 "has_value_ge": bool(value_groups),

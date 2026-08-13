@@ -27,6 +27,12 @@ oracle_state_file = 'checkpoints/oracle_frozen_1065600.pt'
 # 编码 rayon 线程池大小（None/省略 = 逻辑核数）；重启服务生效
 rayon_threads = 12
 
+# 多模型：协议名 -> checkpoint 路径。前端下拉选 Seer / LuckyS。
+# GRP/value_dist/oracle 是独立共享组件，不随主模型变，只多加载 Brain+DQN。
+[review.models]
+Seer = 'checkpoints/seer.1.0.收敛版.pth'
+LuckyS = 'checkpoints/mortal.pth'
+
 [env]
 gamma = 1.0
 pts = [6, 3, 0, -12]
