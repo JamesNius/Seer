@@ -1,7 +1,7 @@
 [control]
 version = 4
 online = false
-state_file = 'checkpoints/seer.1.0.收敛版.pth'
+state_file = 'checkpoints/mortal.pth'
 best_state_file = 'checkpoints/best.pth'
 tensorboard_dir = 'runs'
 device = 'cuda'
@@ -27,11 +27,11 @@ oracle_state_file = 'checkpoints/oracle_frozen_1065600.pt'
 # 编码 rayon 线程池大小（None/省略 = 逻辑核数）；重启服务生效
 rayon_threads = 12
 
-# 多模型：协议名 -> checkpoint 路径。前端下拉选 Seer / LuckyS。
+# 多模型：协议名 -> checkpoint 路径。前端下拉选 Seer / Seer-X。
 # GRP/value_dist/oracle 是独立共享组件，不随主模型变，只多加载 Brain+DQN。
 [review.models]
 Seer = 'checkpoints/seer.1.0.收敛版.pth'
-LuckyS = 'checkpoints/mortal.pth'
+Seer-X = 'checkpoints/mortal.pth'
 
 [env]
 gamma = 1.0
@@ -113,7 +113,7 @@ enable_rule_based_agari_guard = true
 [1v3.champion]
 device = 'cuda'
 name = 'baseline'
-state_file = 'checkpoints/baseline.pth'
+state_file = 'checkpoints/seer.1.0.收敛版.pth'
 stochastic_latent = false
 enable_compile = false
 enable_amp = true

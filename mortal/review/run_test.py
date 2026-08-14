@@ -16,6 +16,10 @@ state = torch.load(state_file, weights_only=True, map_location='cpu')
 cfg = state['config']
 version = cfg['control'].get('version', 1)
 
+# 并行模式: MORTAL_TEST_LOG_DIR 覆盖 log_dir(避免多进程写同一目录互相覆盖)
+if 'MORTAL_TEST_LOG_DIR' in os.environ:
+    config['test_play']['log_dir'] = os.environ['MORTAL_TEST_LOG_DIR']
+
 mortal = Brain(version=version, conv_channels=cfg['resnet']['conv_channels'],
                num_blocks=cfg['resnet']['num_blocks']).eval()
 dqn = DQN(version=version).eval()
