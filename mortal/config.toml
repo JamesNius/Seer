@@ -1,7 +1,7 @@
 [control]
 version = 4
 online = false
-state_file = 'checkpoints/SeerX.pth'
+state_file = 'checkpoints/SeerX1.0bug修复版.pth'
 best_state_file = 'checkpoints/best.pth'
 tensorboard_dir = 'runs'
 device = 'cuda'
@@ -31,7 +31,7 @@ rayon_threads = 12
 # GRP/value_dist/oracle 是独立共享组件，不随主模型变，只多加载 Brain+DQN。
 [review.models]
 Seer = 'checkpoints/seer.1.0.收敛版.pth'
-Seer-X = 'checkpoints/SeerX1.0bug修复版.pth'
+SeerX = 'checkpoints/SeerX1.0bug修复版.pth'
 
 [env]
 gamma = 1.0
@@ -88,12 +88,12 @@ tenhou_sample_ratio = 0.5
 [baseline.train]
 device = 'cuda'
 enable_compile = false
-state_file = 'checkpoints/baseline.pth'
+state_file = 'checkpoints/seer.1.0.收敛版.pth'
 
 [baseline.test]
 device = 'cuda'
 enable_compile = false
-state_file = 'checkpoints/baseline.pth'
+state_file = 'checkpoints/seer.1.0.收敛版.pth'
 
 [online]
 history_window = 50

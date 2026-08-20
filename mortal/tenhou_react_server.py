@@ -15,7 +15,7 @@
 
 用法：
   python tenhou_react_server.py          # 默认端口 8787
-  python tenhou_react_server.py --port 8787 --model Seer-X
+  python tenhou_react_server.py --port 8787 --model SeerX
 """
 
 import argparse
@@ -141,7 +141,7 @@ class ReactResponse(BaseModel):
 
 
 class TenhouReactServer:
-    def __init__(self, model_name: str = "Seer-X"):
+    def __init__(self, model_name: str = "SeerX"):
         self.device = torch.device(config["control"]["device"])
         self.model_name = model_name
         self.engine = self._load_engine(model_name)
@@ -302,7 +302,7 @@ _server: TenhouReactServer = None
 @app.on_event("startup")
 def _startup():
     global _server
-    model = os.environ.get("TENHOU_MODEL", "Seer-X")
+    model = os.environ.get("TENHOU_MODEL", "SeerX")
     _server = TenhouReactServer(model_name=model)
 
 
