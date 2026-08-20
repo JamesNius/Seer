@@ -290,11 +290,14 @@ def train():
         remaining_o_bin = []
         remaining_bs = 0
         pb = tqdm(total=save_every, desc='TRAIN', initial=steps % save_every)
+        # 到 max_steps 即停: 防止 LR 衰减到底后继续跑剩余 epoch 数据导致 loss 跳变。
+        max_steps_reached = False
 
         def train_batch(obs, actions, masks, steps_to_done, kyoku_rewards, player_ranks, o_cnt, o_bin):
             nonlocal steps
             nonlocal idx
             nonlocal pb
+            nonlocal max_steps_reached
 
             obs = obs.to(dtype=torch.float32, device=device)
             actions = actions.to(dtype=torch.int64, device=device)
@@ -359,6 +362,9 @@ def train():
 
             steps += 1
             idx += 1
+            # 到 max_steps 即停: 防止 LR 衰减到底后继续跑剩余数据导致 loss 跳变。
+            if steps >= scheduler.max_steps:
+                max_steps_reached = True
             if idx % opt_step_every == 0:
                 if max_grad_norm > 0:
                     scaler.unscale_(optimizer)
@@ -521,6 +527,8 @@ def train():
                 remaining_bs += bs
                 continue
             train_batch(obs, actions, masks, steps_to_done, kyoku_rewards, player_ranks, o_cnt, o_bin)
+            if max_steps_reached:
+                break
 
         remaining_batches = remaining_bs // batch_size
         if remaining_batches > 0:

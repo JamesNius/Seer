@@ -334,6 +334,11 @@ def convert_to_tenhou6(events: list[dict]) -> dict:
             consumed = ev.get('consumed', [])
             naki = _make_daiminkan(actor, target, pai, consumed)
             current['takes'][actor].append(naki)
+            # tenhou.net/6 格式: daiminkan 的 'm' 字符串记在 takes, 但出牌表里
+            # 要留一个 0 (Unknown) 占位。convlog 的 finalize_discards 据此跳过
+            # 该 discard 槽位并继续消费下一条 take; 缺了它会对齐错位, 产生
+            # Dahai{pai:'?'} 或 insufficient/insufficient take 转换错误。
+            current['discards'][actor].append(0)
 
         elif t == 'kakan':
             actor = ev['actor']

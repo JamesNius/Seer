@@ -1,7 +1,7 @@
 [control]
 version = 4
 online = false
-state_file = 'checkpoints/mortal.pth'
+state_file = 'checkpoints/SeerX.pth'
 best_state_file = 'checkpoints/best.pth'
 tensorboard_dir = 'runs'
 device = 'cuda'
@@ -31,7 +31,7 @@ rayon_threads = 12
 # GRP/value_dist/oracle 是独立共享组件，不随主模型变，只多加载 Brain+DQN。
 [review.models]
 Seer = 'checkpoints/seer.1.0.收敛版.pth'
-Seer-X = 'checkpoints/mortal.pth'
+Seer-X = 'checkpoints/SeerX1.0bug修复版.pth'
 
 [env]
 gamma = 1.0
@@ -61,16 +61,18 @@ weight_decay = 0.1
 max_grad_norm = 5.0
 
 [optim.scheduler]
-peak = 2e-4
-# 封版收敛：step ~1,758,400 起余弦衰减，2025 数据（17.9万对局 ≈ 11.5万步）耗尽时降到 1e-6 收尾
+peak = 2.04e-5
+# 从 SeerX.pth(1,929,600, LR=2.04e-5) 平滑衰减到 max_steps=1,954,000
+# 剩余 24,400 步, LR 从 2.04e-5 余弦降到 1e-6 (到 max 自动停, 防跑过头)
 final = 1e-6
 warm_up_steps = 0
-max_steps = 1875000
+max_steps = 1954000
 
 [dataset]
 globs = [
-    # 2020/2024 已完成训练；收敛阶段只训 2025 新数据，一个 epoch ≈ 11.5 万步
-    'E:/天凤训练数据/2025/*.mjson',
+    # 原配: LuckyJ aug(126倍) + 天凤 2024 抽 50% (与 SeerX 训练时一致)
+    'E:/Program Files/JetBrains/IdeaProjects/batchmortal/luckyj_aug/*.mjson',
+    'E:/天凤训练数据/2024/*.mjson',
 ]
 file_index = 'file_index.pth'
 file_batch_size = 15
@@ -80,6 +82,8 @@ player_names_files = []
 num_epochs = 1
 enable_augmentation = false
 augmented_first = false
+luckyj_oversample = 1
+tenhou_sample_ratio = 0.5
 
 [baseline.train]
 device = 'cuda'
@@ -104,7 +108,7 @@ log_dir = '1v3_logs'
 [1v3.challenger]
 device = 'cuda'
 name = 'mortal'
-state_file = 'checkpoints/mortal.pth'
+state_file = 'checkpoints/SeerX1.0bug修复版.pth'
 stochastic_latent = false
 enable_compile = false
 enable_amp = true
