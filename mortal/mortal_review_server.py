@@ -288,14 +288,9 @@ class MortalReviewServer:
 
             if "tag" in state:
                 tag = state["tag"]
-            elif name in ("SeerX", "Seer-X"):
-                # 新模型叫 SeerX: tag 直接用模型名, 不再自动生成 mortal4-...(过时的架构标签)
-                tag = "SeerX"
             else:
-                t = datetime.fromtimestamp(state["timestamp"], tz=timezone.utc).strftime(
-                    "%y%m%d%H"
-                )
-                tag = f"mortal{version}-b{num_blocks}c{conv_channels}-t{t}"
+                # 直接用模型名做 tag(Seer->Seer, SeerX->SeerX), 不再自动生成 mortal4-...架构标签
+                tag = name
 
             brain = Brain(
                 version=version, num_blocks=num_blocks, conv_channels=conv_channels
