@@ -240,7 +240,56 @@ class TenhouReactServer:
         mask_bits = meta.get("mask_bits")
         if mask_bits is not None and mask_bits.bit_count() <= 1:
             return None
+
+        # 修正 tsumogiri: libriichi Bot 只按"切牌==刚摸牌"判摸切, 没考虑
+        # 手牌里(不含副露)是否也有同张。若手里还有同张, 切这张可能是手切(打手里的),
+        # 应标 false。赤5 天然保护: 赤5 只有一张, 摸赤5打赤5 手牌无同张 → 仍摸切。
+        self._fix_tsumogiri(player_id, events, reaction)
         return reaction
+
+    def _fix_tsumogiri(self, player_id: int, events: List[dict], reaction: dict) -> None:
+        """重建自家手牌(不含副露), 修正 dahai 的 tsumogiri。原地修改 reaction。"""
+        if reaction.get("type") != "dahai":
+            return
+        pai = reaction.get("pai")
+        if not pai:
+            return
+        # 从 events 重建自家手牌(不含副露) + 最近一次自家摸的牌
+        hand: list = []          # 当前手牌(不含副露, 不含刚摸的)
+        last_tsumo = None        # 最近一次自家摸的牌
+        for ev in events:
+            t = ev.get("type")
+            actor = ev.get("actor")
+            if t == "start_kyoku":
+                tehais = ev.get("tehais") or []
+                if 0 <= player_id < len(tehais):
+                    hand = list(tehais[player_id])
+                last_tsumo = None
+            elif actor == player_id:
+                if t == "tsumo":
+                    last_tsumo = ev.get("pai")
+                    # 刚摸的牌暂不进 hand, 单独用 last_tsumo 判断来源
+                elif t == "dahai":
+                    d = ev.get("pai")
+                    if d in hand:
+                        hand.remove(d)
+                    last_tsumo = None
+                elif t in ("pon", "chi", "daiminkan", "ankan", "kakan"):
+                    # 副露: consumed + pai 离开手牌
+                    consumed = ev.get("consumed") or []
+                    for c in consumed:
+                        if c in hand:
+                            hand.remove(c)
+                    p = ev.get("pai")
+                    if p in hand:
+                        hand.remove(p)
+                    last_tsumo = None
+        # 判定: 切的牌 == 刚摸的牌, 且手牌里(不含刚摸)还有同张 → 可能是手切(打手里的)
+        if last_tsumo is not None and pai == last_tsumo:
+            if pai in hand:
+                reaction["tsumogiri"] = False
+            else:
+                reaction["tsumogiri"] = True
 
     @staticmethod
     def _kyoku_key(player_id: int, events: List[dict]) -> tuple:
