@@ -307,7 +307,18 @@ def train():
             player_ranks = player_ranks.to(dtype=torch.int64, device=device)
             o_cnt = o_cnt.to(dtype=torch.int64, device=device)
             o_bin = o_bin.to(dtype=torch.float32, device=device)
-            assert masks[range(batch_size), actions].all()
+            # 坏样本保护: 极少数数据里 action 不在合法 mask 内(数据异常, 个位数文件)。
+            # 遇到就整批跳过(不训练), 避免污染模型; 也避免改动样本数导致
+            # all_q/idx 计数错位。代价仅 1024 个样本, 可忽略。
+            bs = obs.shape[0]
+            bad = ~masks[range(bs), actions]
+            if bad.any():
+                bad_idx = bad.nonzero(as_tuple=True)[0].tolist()
+                logging.warning(
+                    f'[SKIP] invalid sample(s) at step {steps}: '
+                    f'{len(bad_idx)} in batch (idx={bad_idx[:10]}), batch skipped'
+                )
+                return
 
             q_target_mc = gamma ** steps_to_done * kyoku_rewards
             q_target_mc = q_target_mc.to(torch.float32)
@@ -318,7 +329,7 @@ def train():
                     mu, logsig = phi
                     phi = mu
                 q_out = dqn(phi, masks)
-                q = q_out[range(batch_size), actions]
+                q = q_out[range(bs), actions]
                 dqn_loss = 0.5 * mse(q, q_target_mc)
                 cql_loss = 0
                 if not online:
@@ -435,6 +446,21 @@ def train():
                     'oracle_frozen': oracle_weight <= 0,
                 }
                 torch.save(state, state_file)
+
+                # 定期归档快照, 供 checkpoint soup / 回滚用。
+                # 只拷文件(不占额外显存), 频率由 config [control] archive_every 控制。
+                # 归档失败绝不允许中断训练: 此处 state_file 已落盘, 最坏情况只是少一份快照。
+                archive_every = config['control'].get('archive_every', 0)
+                if archive_every > 0 and steps % archive_every == 0:
+                    try:
+                        archive_dir = config['control'].get('archive_dir', 'checkpoints/archive')
+                        os.makedirs(archive_dir, exist_ok=True)
+                        stem = path.splitext(path.basename(state_file))[0]
+                        archive_path = path.join(archive_dir, f'{stem}_step{steps}.pth')
+                        shutil.copy(state_file, archive_path)
+                        logging.info(f'archived snapshot -> {archive_path}')
+                    except Exception as e:
+                        logging.warning(f'archive failed (ignored, training continues): {e}')
 
                 if online and steps % submit_every != 0:
                     submit_param(mortal, dqn, is_idle=False)
