@@ -31,3 +31,6 @@ libriichi/dist_local/
 mortal/.claude/
 mortal/ab_new/
 mortal/ab_old/
+
+# 项目记忆（本地保留，不进版本库）
+.workbuddy/memory/
