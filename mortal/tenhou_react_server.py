@@ -149,7 +149,7 @@ class TenhouReactServer:
         self._bot = None        # 当前小局的 Bot
         self._bot_key = None    # 当前小局指纹（用于检测换小局）
         self._bot_n = 0         # Bot 已处理的事件数
-        log.info(f"SeerX 引擎加载完成: {model_name} (device={self.device})")
+        log.info(f"引擎加载完成: {model_name} (device={self.device})")
 
     def _load_engine(self, model_name: str) -> MortalEngine:
         """加载指定模型的 Brain+DQN，返回 MortalEngine。"""
@@ -378,7 +378,7 @@ def models():
     """Akagi 查询可用模型列表。"""
     return {
         "models": [
-            {"id": _server.model_name, "game": "tenhou", "desc": "SeerX local"},
+            {"id": _server.model_name, "game": "tenhou", "desc": f"{_server.model_name} local"},
         ],
     }
 
