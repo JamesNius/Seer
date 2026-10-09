@@ -293,6 +293,21 @@ def train():
                 }
                 torch.save(state, state_file)
 
+                # ── restore #3: 定期归档快照, 供 checkpoint soup / 回滚用 ──
+                # 只拷文件(不占额外显存), 频率由 [control] archive_every 控制。
+                # 归档失败绝不允许中断训练: state_file 已落盘, 最坏只是少一份快照。
+                archive_every = config['control'].get('archive_every', 0)
+                if archive_every > 0 and steps % archive_every == 0:
+                    try:
+                        archive_dir = config['control'].get('archive_dir', 'checkpoints/archive')
+                        os.makedirs(archive_dir, exist_ok=True)
+                        stem = path.splitext(path.basename(state_file))[0]
+                        archive_path = path.join(archive_dir, f'{stem}_step{steps}.pth')
+                        shutil.copy(state_file, archive_path)
+                        logging.info(f'archived snapshot -> {archive_path}')
+                    except Exception as e:
+                        logging.warning(f'archive failed (ignored, training continues): {e}')
+
                 if steps % test_every == 0:
                     stat = test_player.test_play(test_games // 4, mortal, policy_net, device)
                     mortal.train()

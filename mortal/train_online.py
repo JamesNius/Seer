@@ -329,6 +329,19 @@ def train():
                 }
                 torch.save(state, state_file)
 
+                # ── restore #3: 定期归档快照, 供 checkpoint soup / 回滚用 ──
+                archive_every = config['control'].get('archive_every', 0)
+                if archive_every > 0 and steps % archive_every == 0:
+                    try:
+                        archive_dir = config['control'].get('archive_dir', 'checkpoints/archive')
+                        os.makedirs(archive_dir, exist_ok=True)
+                        stem = path.splitext(path.basename(state_file))[0]
+                        archive_path = path.join(archive_dir, f'{stem}_step{steps}.pth')
+                        shutil.copy(state_file, archive_path)
+                        logging.info(f'archived snapshot -> {archive_path}')
+                    except Exception as e:
+                        logging.warning(f'archive failed (ignored, training continues): {e}')
+
                 if online and steps % submit_every != 0:
                     submit_param(mortal, policy_net, is_idle=False)
                     logging.info('param has been submitted')
