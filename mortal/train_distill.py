@@ -125,6 +125,24 @@ def train():
         'lock': manager.Lock()
     }
 
+    # ── 断点续训: state_file 已存在则接着训 ────────────────────────────
+    # 用途: 先跑 30k 看 teacher-match 趋势, 不够就把 max_steps 调大、重跑本脚本,
+    #       它会从这里接着练, 不用从随机初始化重来。
+    if path.exists(state_file):
+        _st = torch.load(state_file, weights_only=False, map_location=device)
+        mortal.load_state_dict(_st['mortal'])
+        policy_net.load_state_dict(_st['policy_net'])
+        if 'optimizer' in _st:
+            optimizer.load_state_dict(_st['optimizer'])
+        if 'scheduler' in _st:
+            scheduler.load_state_dict(_st['scheduler'])
+        if 'scaler' in _st:
+            scaler.load_state_dict(_st['scaler'])
+        steps = int(_st.get('steps', 0))
+        logging.info(f'[DISTILL] resumed from {state_file} @ step {steps:,} (继续训到 max_steps)')
+    else:
+        logging.info(f'[DISTILL] 从随机初始化开始 (state_file 不存在: {state_file})')
+
     if device.type == 'cuda':
         logging.info(f'device: {device} ({torch.cuda.get_device_name(device)})')
     writer = SummaryWriter(config['control']['tensorboard_dir'])

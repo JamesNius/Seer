@@ -89,7 +89,7 @@ awr_clip = 100
 # train_distill.py 专用: 把 value-based 教师蒸馏进 policy 学生(给 AWR 一个好起点)
 teacher_state_file = 'checkpoints/seer.1.0.收敛版.pth'
 tau = 0.1          # 教师 Q 的 softmax 温度: 越小分布越锐利(0.1 = 与复盘显示一致)
-max_steps = 30000  # 蒸馏总步数 (可用环境变量 DISTILL_MAX_STEPS 覆盖)
+max_steps = 100000  # 蒸馏总步数 (可用环境变量 DISTILL_MAX_STEPS 覆盖)。支持断点续训: 调大后重跑即接着练。
 
 [dataset]
 globs = [
