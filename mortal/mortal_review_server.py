@@ -30,7 +30,11 @@ from datetime import datetime, timezone
 import numpy as np
 import torch
 import orjson  # 快速 JSON(Pass 3 热路径)
-from model import Brain, DQN, GRP, OracleNet, CategoricalPolicy
+from model import Brain, DQN, GRP, CategoricalPolicy
+try:
+    from model import OracleNet          # 老分支有; 合并后的 policy 分支已移除这个头
+except ImportError:
+    OracleNet = None
 from engine import MortalEngine
 from value_dist.infer import load_predictor
 from libriichi.mjai import Bot
@@ -242,7 +246,12 @@ class MortalReviewServer:
         # oracle 是共享组件：多模型共用同一份，不随主模型变。
         oracle_net = None
         self.version = config["control"].get("version", 1)
-        if config.get("review", {}).get("enable_oracle", False):
+        _oracle_on = config.get("review", {}).get("enable_oracle", False)
+        if _oracle_on and OracleNet is None:
+            logging.warning(
+                "enable_oracle=true, 但 model.py 内已无 OracleNet(合并到 policy 分支时被移除) → 跳过 oracle"
+            )
+        if _oracle_on and OracleNet is not None:
             oracle_state_file = config["review"].get(
                 "oracle_state_file", config["control"]["state_file"]
             )
@@ -344,7 +353,8 @@ class MortalReviewServer:
             fake_masks = [np.ones((46,), dtype=bool)] * BATCH_CHUNK
             for engine in self.engines.values():
                 engine.react_batch(fake_obs, fake_masks, None)
-                engine.oracle_log.clear()   # 清掉预热产生的 oracle 垃圾数据
+                if getattr(engine, 'oracle_log', None) is not None:
+                    engine.oracle_log.clear()   # 清掉预热产生的 oracle 垃圾数据
             logging.info(f"Warm-up done ({len(self.engines)} engines, obs shape: {shape})")
         except Exception:
             logging.warning(f"Warm-up failed (non-fatal):\n{traceback.format_exc()}")
