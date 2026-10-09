@@ -1,8 +1,8 @@
 [control]
 version = 4
 online = false
-state_file = 'checkpoints/SeerX1.0bug修复版.pth'
-best_state_file = 'checkpoints/best.pth'
+state_file = 'checkpoints/SeerPolicy.pth'
+best_state_file = 'checkpoints/best_SeerPolicy.pth'
 tensorboard_dir = 'runs'
 device = 'cuda'
 enable_cudnn_benchmark = true
@@ -11,8 +11,13 @@ enable_compile = false
 batch_size = 1024
 opt_step_every = 1
 save_every = 400
-test_every = 2000000
+test_every = 20000
 submit_every = 400
+old_update_every = 400      # train_online.py 用: old policy 刷新间隔(蒸馏/AWR 不读)
+# 每 1 万步归档一份快照到 checkpoints/archive_2v2/, 供 Seer2.0v2 中途体检/挑快照用。
+# 设为 0 关闭。正在运行的进程不受影响, 下次重启训练生效。
+archive_every = 10000
+archive_dir = 'checkpoints/archive_2v2'
 
 [test_play]
 games = 1000
@@ -29,14 +34,16 @@ rayon_threads = 12
 
 # 多模型：协议名 -> checkpoint 路径。前端下拉选 Seer / Seer-X。
 # GRP/value_dist/oracle 是独立共享组件，不随主模型变，只多加载 Brain+DQN。
+# SeerX = 'checkpoints/SeerX1.0bug修复版.pth'    SeerX = 'checkpoints/Seer2.0.pth' 
+# Seer = 'checkpoints/seer.1.0.收敛版.pth'
 [review.models]
-Seer = 'checkpoints/seer.1.0.收敛版.pth'
+Seer = 'checkpoints/Seer2.0.pth'
 SeerX = 'checkpoints/SeerX1.0bug修复版.pth'
 
 [env]
 gamma = 1.0
 pts = [6, 3, 0, -12]
-point_weight = 0.15
+point_weight = 0.0      # 从零训练: 不用打点系数, 纯顺位 pts
 
 [resnet]
 conv_channels = 192
@@ -61,18 +68,49 @@ weight_decay = 0.1
 max_grad_norm = 5.0
 
 [optim.scheduler]
-peak = 2.04e-5
-# 从 SeerX.pth(1,929,600, LR=2.04e-5) 平滑衰减到 max_steps=1,954,000
-# 剩余 24,400 步, LR 从 2.04e-5 余弦降到 1e-6 (到 max 自动停, 防跑过头)
-final = 1e-6
+# ===== policy 分支 (AWR/蒸馏) —— 恒定 LR, 不退火, 不 warmup =====
+# 与 Mortal-Policy 官方示例一致 (peak=final=1e-4, max_steps=0)。
+# AWR 无 max_steps 停止逻辑 (train_offline_phase1.py 只跑 num_epochs 遍数据) → max_steps 仅定义 LR 曲线, 0 = 恒定。
+# 因为模型用 GroupNorm(无 running stats), 旧的「退火→BN running_var 塌→Q 爆」结构性不存在, 无需短退火避险。
+# 步数不用预设: 1 遍数据 ≈165 万步 (batch 1024) 后自动停; 每 save_every=400 步存盘, 随时可 Ctrl+C。
+peak = 1e-4
+final = 1e-4
 warm_up_steps = 0
-max_steps = 1954000
+max_steps = 0
+
+[policy]
+# PG 训练 (train_offline_phase1.py / train_online.py) 专用
+awr_beta = 1.0
+awr_clip = 100
+
+[distill]
+# train_distill.py 专用: 把 value-based 教师蒸馏进 policy 学生(给 AWR 一个好起点)
+teacher_state_file = 'checkpoints/seer.1.0.收敛版.pth'
+tau = 0.1          # 教师 Q 的 softmax 温度: 越小分布越锐利(0.1 = 与复盘显示一致)
+max_steps = 30000  # 蒸馏总步数 (可用环境变量 DISTILL_MAX_STEPS 覆盖)
 
 [dataset]
 globs = [
-    # 原配: LuckyJ aug(126倍) + 天凤 2024 抽 50% (与 SeerX 训练时一致)
-    'E:/Program Files/JetBrains/IdeaProjects/batchmortal/luckyj_aug/*.mjson',
-    'E:/天凤训练数据/2024/*.mjson',
+    # ===== policy 分支: 全量数据 (教师见过全年代, 蒸馏/离线 AWR 都用全量) =====
+    'E:/天凤训练数据/2009/**/*.mjson',
+    'E:/天凤训练数据/2010/**/*.mjson',
+    'E:/天凤训练数据/2011/**/*.mjson',
+    'E:/天凤训练数据/2012/**/*.mjson',
+    'E:/天凤训练数据/2013/**/*.mjson',
+    'E:/天凤训练数据/2014/**/*.mjson',
+    'E:/天凤训练数据/2015/**/*.mjson',
+    'E:/天凤训练数据/2016/**/*.mjson',
+    'E:/天凤训练数据/2017/**/*.mjson',
+    'E:/天凤训练数据/2018/**/*.mjson',
+    'E:/天凤训练数据/2019/**/*.mjson',
+    'E:/天凤训练数据/2020/**/*.mjson',
+    'E:/天凤训练数据/2021/**/*.mjson',
+    'E:/天凤训练数据/2022/**/*.mjson',
+    'E:/天凤训练数据/2023/**/*.mjson',
+    'E:/天凤训练数据/2024/**/*.mjson',
+    'E:/天凤训练数据/2025/**/*.mjson',
+    'E:/天凤训练数据/2026/**/*.mjson',
+    # 注: 2025_luckyj10 是 2025 的精选子集, 不单独列出以免重复计入。
 ]
 file_index = 'file_index.pth'
 file_batch_size = 15
@@ -98,6 +136,34 @@ state_file = 'checkpoints/seer.1.0.收敛版.pth'
 [online]
 history_window = 50
 enable_compile = false
+
+# ===== online RL 自对弈（离线收官后启用；offline 模式下以下配置不生效）=====
+# 启用清单（届时再改，现在别动）:
+#   1. [control] online = true
+#   2. [freeze_bn] mortal = true        # example 注释: online 训练时冻结 BN
+#   3. [control] batch_size = 512       # online 数据流小, 降 batch
+#   4. [baseline.train] state_file 指向 Seer2.0 收官权重(自对弈对手, 每隔几天手动换新形成"联赛")
+#   5. [optim.scheduler] peak 降到 1e-5 量级(从预训练底座出发的 RL 微调)
+# 启动顺序: python server.py  →  python client.py  →  python train.py
+# (online 模式下 train.py 会自动起子进程循环, 见 train.py main)
+[train_play.default]
+games = 400                # 每个自对弈 session 局数; 你的机器 100 局≈6.5min → 400 局≈26min
+log_dir = 'train_play_logs'
+boltzmann_epsilon = 0.005  # 探索参数, 官方示例值
+boltzmann_temp = 0.05
+top_p = 1.0
+repeats = 1
+
+[online.remote]
+host = '127.0.0.1'
+port = 5000
+
+[online.server]
+buffer_dir = 'online_buffer'
+drain_dir = 'online_drain'
+capacity = 800             # buffer 满 800 局 trainer 才 drain; ≈2 个 session ≈3.3 万样本
+force_sequential = true    # 单 GPU 必须 true: 训练时 client 等待, 避免爆显存
+# 注: example 里的 sample_reuse_rate/threshold 是死字段, 代码从未读取, 勿依赖
 
 [1v3]
 seed_key = -1
