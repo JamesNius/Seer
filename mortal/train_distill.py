@@ -18,6 +18,7 @@ def train():
     import json
     import random
     import math
+    import time
     from os import path
     from glob import glob
     from datetime import datetime
@@ -64,6 +65,8 @@ def train():
     teacher_state_file = config['distill']['teacher_state_file']
     tau = float(config['distill']['tau'])          # 教师 Q 的 softmax 温度: 越小分布越锐利
     max_steps = int(os.environ.get('DISTILL_MAX_STEPS', config['distill']['max_steps']))  # 总步数; 环境变量可覆盖(冒烟用)
+    LOG_EVERY = int(os.environ.get('DISTILL_LOG_EVERY', 20))   # 每隔多少步打一行进度(步数/速度/ETA)
+    t_start = time.time()
 
     # ── 学生(与 AWR 完全一致的构造) ────────────────────────────────────
     mortal = Brain(version=version, **config['resnet'], Norm="GN").to(device)
@@ -145,6 +148,12 @@ def train():
 
     if device.type == 'cuda':
         logging.info(f'device: {device} ({torch.cuda.get_device_name(device)})')
+    # 日志同时写文件(脚本自带, 不依赖 .bat 重定向), 控制台也实时可见
+    os.makedirs('logs', exist_ok=True)
+    _fh = logging.FileHandler(path.join('logs', 'distill.log'), mode='a', encoding='utf-8')
+    _fh.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
+    logging.getLogger().addHandler(_fh)
+
     writer = SummaryWriter(config['control']['tensorboard_dir'])
 
     # ── 数据(复用 AWR 同一套 FileDatasetsIter；只用 obs/masks) ─────────
@@ -184,11 +193,10 @@ def train():
             worker_init_fn=worker_init_fn,
         ))
 
-        pb = tqdm(total=max_steps, desc='DISTILL', initial=steps)
         idx = 0
 
         def train_batch(obs, masks):
-            nonlocal steps, idx, pb
+            nonlocal steps, idx
             obs = obs.to(dtype=torch.float32, device=device)
             masks = masks.to(dtype=torch.bool, device=device)
 
@@ -202,6 +210,7 @@ def train():
 
             scaler.scale(loss / opt_step_every).backward()
             stats['loss'] += loss.item()
+            stats['n'] += 1
             with torch.no_grad():
                 # 学生 argmax 与教师 argmax 的一致率 = 最直观的"学到没有"指标
                 stats['match'] += (p_s.argmax(-1) == p_t.argmax(-1)).float().mean().item()
@@ -217,19 +226,27 @@ def train():
                 scaler.update()
                 optimizer.zero_grad(set_to_none=True)
             scheduler.step()
-            pb.update(1)
+
+            # ── 进度行: 每 LOG_EVERY 步一行, 含 步数/百分比/loss/一致率/速度/预计剩余 ──
+            if steps % LOG_EVERY == 0:
+                n = max(stats['n'], 1)
+                avg_loss = stats['loss'] / n
+                avg_match = stats['match'] / n
+                rate = steps / max(time.time() - t_start, 1e-9)
+                eta_h = (max_steps - steps) / max(rate, 1e-9) / 3600.0
+                logging.info(
+                    f'[DISTILL] step {steps:,}/{max_steps:,} ({100.0 * steps / max_steps:.1f}%)'
+                    f' | loss={avg_loss:.4f} | teacher-match={avg_match:.4f}'
+                    f' | {rate:.2f} step/s | ETA {eta_h:.1f}h'
+                )
+                writer.add_scalar('loss', avg_loss, steps)
+                writer.add_scalar('teacher_match', avg_match, steps)
+                stats['loss'] = 0.0
+                stats['match'] = 0.0
+                stats['n'] = 0
 
             if steps % save_every == 0:
-                pb.close()
-                writer.add_scalar('loss', stats['loss'] / save_every, steps)
-                writer.add_scalar('match', stats['match'] / save_every, steps)
                 writer.flush()
-                logging.info(
-                    f'[DISTILL] step {steps:,} | loss={stats["loss"] / save_every:.4f} '
-                    f'| teacher-match={stats["match"] / save_every:.4f}'
-                )
-                for k in stats:
-                    stats[k] = 0
                 state = {
                     'mortal': mortal.state_dict(),
                     'policy_net': policy_net.state_dict(),
@@ -244,7 +261,6 @@ def train():
                 }
                 torch.save(state, state_file)
                 logging.info(f'[DISTILL] saved: {state_file} (steps={steps:,})')
-                pb = tqdm(total=max_steps, desc='DISTILL', initial=steps)
 
         for batch in data_loader:
             obs, _actions, masks = batch[0], batch[1], batch[2]
@@ -253,9 +269,8 @@ def train():
             train_batch(obs, masks)
             if steps >= max_steps:
                 break
-        pb.close()
 
-    stats = {'loss': 0, 'match': 0}
+    stats = {'loss': 0, 'match': 0, 'n': 0}
     while steps < max_steps:
         train_epoch()
         gc.collect()
