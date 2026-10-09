@@ -237,7 +237,18 @@ def train():
             actions = actions.to(dtype=torch.int64, device=device)
             masks = masks.to(dtype=torch.bool, device=device)
             advantage = advantage.to(dtype=torch.float32, device=device)
-            assert masks[range(batch_size), actions].all()
+            # ── restore #4: 坏样本保护 ──
+            # 极少数数据里 action 不在合法 mask 内(数据异常, 个位数文件)。
+            # 遇到就整批跳过(不训练), 避免污染模型; 也避免改动样本数导致 idx 计数错位。
+            bs = obs.shape[0]
+            bad = ~masks[range(bs), actions]
+            if bad.any():
+                bad_idx = bad.nonzero(as_tuple=True)[0].tolist()
+                logging.warning(
+                    f'[SKIP] invalid sample(s) at step {steps}: '
+                    f'{len(bad_idx)} in batch (idx={bad_idx[:10]}), batch skipped'
+                )
+                return
 
             with torch.autocast(device.type, enabled=enable_amp):
                 dist = Categorical(probs=policy_net(mortal(obs),masks))

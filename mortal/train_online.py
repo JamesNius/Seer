@@ -250,7 +250,16 @@ def train():
             actions = actions.to(dtype=torch.int64, device=device)
             masks = masks.to(dtype=torch.bool, device=device)
             advantage = advantage.to(dtype=torch.float32, device=device)
-            assert masks[range(batch_size), actions].all()
+            # ── restore #4: 坏样本保护（整批跳过, 不污染模型）──
+            bs = obs.shape[0]
+            bad = ~masks[range(bs), actions]
+            if bad.any():
+                bad_idx = bad.nonzero(as_tuple=True)[0].tolist()
+                logging.warning(
+                    f'[SKIP] invalid sample(s) at step {steps}: '
+                    f'{len(bad_idx)} in batch (idx={bad_idx[:10]}), batch skipped'
+                )
+                return
 
             with torch.no_grad():
                 with torch.autocast(device.type, enabled=enable_amp):
