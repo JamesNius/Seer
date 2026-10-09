@@ -232,6 +232,7 @@ def train():
             nonlocal steps
             nonlocal idx
             nonlocal pb
+            nonlocal max_steps_reached
 
             obs = obs.to(dtype=torch.float32, device=device)
             actions = actions.to(dtype=torch.int64, device=device)
@@ -266,6 +267,11 @@ def train():
 
             steps += 1
             idx += 1
+            # ── restore #5: 到 max_steps 即停 ──
+            # ⚠️ 带 max_steps > 0 保护: 本 config 的 max_steps=0 表示"恒定 LR",
+            #    若照 main 原样写 `steps >= scheduler.max_steps`, 会第一步就停。
+            if scheduler.max_steps > 0 and steps >= scheduler.max_steps:
+                max_steps_reached = True
             if idx % opt_step_every == 0:
                 if max_grad_norm > 0:
                     scaler.unscale_(optimizer)
@@ -387,6 +393,8 @@ def train():
                         shutil.copy(state_file, best_state_file)
                 pb = tqdm(total=save_every, desc='TRAIN')
 
+        max_steps_reached = False
+
         for obs, actions, masks, advantage in data_loader:
             bs = obs.shape[0]
             if bs != batch_size:
@@ -397,6 +405,8 @@ def train():
                 remaining_bs += bs
                 continue
             train_batch(obs, actions, masks, advantage)
+            if max_steps_reached:
+                break
 
         remaining_batches = remaining_bs // batch_size
         if remaining_batches > 0:
