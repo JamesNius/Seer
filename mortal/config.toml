@@ -11,7 +11,9 @@ enable_compile = false
 batch_size = 1024
 opt_step_every = 1
 save_every = 400
-test_every = 20000
+test_every = 20000000       # ← 关掉"训练中测试": test_play 跑完整对局太慢(抢 GPU/CPU、拖慢训练)。
+                            #   中间进度改为: 看 loss 曲线 + 事后挑快照手动跑 1v3。
+                            #   注意必须满足 assert test_every % save_every == 0。
 submit_every = 400
 old_update_every = 400      # train_online.py 用: old policy 刷新间隔(蒸馏/AWR 不读)
 # 每 1 万步归档一份快照到 checkpoints/archive_2v2/, 供 Seer2.0v2 中途体检/挑快照用。
