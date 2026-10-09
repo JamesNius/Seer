@@ -1,9 +1,12 @@
-# This is only an example. Most values are dummy placeholders just to match the
-# types; they are often not optimal and must be tuned.
+#This is only an example. Most values are dummy placeholders just to match the
+#types; they are often not optimal and must be tuned. 
 
 [control]
 version = 4
 online = false
+
+#The values retained from Mortal original repository are preserved as-is 
+#and do not necessarily imply suitability for Mortal-Policy repository
 
 state_file = '/path/to/mortal.pth'
 best_state_file = '/path/to/best.pth'
@@ -20,15 +23,17 @@ opt_step_every = 1
 save_every = 400
 test_every = 20000
 submit_every = 400
+old_update_every = 400
 
 # using env `TRAIN_PLAY_PROFILE`
 [train_play.default]
 games = 800
 log_dir = '/path/to/train_play'
-boltzmann_epsilon = 0.005
-boltzmann_temp = 0.05
-top_p = 1.0
 repeats = 1
+#Using values between 0.0 and 1.0 is unconventional and may harm results,
+#but it could stabilize optimization if other hyperparameters are poorly configured.
+explore_rate = 1.0
+
 
 [test_play]
 games = 3000
@@ -45,23 +50,24 @@ num_epochs = 1
 enable_augmentation = false
 augmented_first = false
 
+#The network architecture varies across value-based Mortal versions(original repository). 
+#MortalV1 defaults to b40c192, while V3 and V4 use b24c512. 
+#Beyond a certain scale, it has minimal impact on final performance but significantly affects training. 
+#This is simply a default configuration and not a recommendation for Mortal-policy.
+[resnet]
+conv_channels = 512
+num_blocks = 24
+
 [env]
-gamma = 1
 pts = [6.0, 4.0, 2.0, 0.0]
 
-[resnet]
-conv_channels = 192
-num_blocks = 40
-
-[cql]
-min_q_weight = 5
-
-[aux]
-next_rank_weight = 0.2
-
-[freeze_bn]
-# `true` in online training
-mortal = false
+## These hyperparameters are merely the default values and do not imply that they are optimal.
+[policy]
+awr_beta = 1.0
+awr_clip = 100
+entropy_weight = 1e-3
+clip_ratio = 0.2
+dual_clip  = 3.0
 
 [optim]
 eps = 1e-8
