@@ -116,8 +116,8 @@ globs = [
 ]
 file_index = 'file_index.pth'
 file_batch_size = 15
-reserve_ratio = 0.0
-num_workers = 1
+reserve_ratio = 0.2     # 留 20% 在缓冲里不抽干 → 减少"装下一批时 GPU 空转"
+num_workers = 4         # 1 → 4: 数据加载单线程是 GPU 掉 0% 的主因(内存吃紧就降到 3)
 player_names_files = []
 num_epochs = 1
 enable_augmentation = false
