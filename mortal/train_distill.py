@@ -184,6 +184,9 @@ def train():
 
             scaler.scale(loss / opt_step_every).backward()
             stats['loss'] += loss.item()
+            with torch.no_grad():
+                # 学生 argmax 与教师 argmax 的一致率 = 最直观的"学到没有"指标
+                stats['match'] += (p_s.argmax(-1) == p_t.argmax(-1)).float().mean().item()
 
             steps += 1
             idx += 1
@@ -201,7 +204,12 @@ def train():
             if steps % save_every == 0:
                 pb.close()
                 writer.add_scalar('loss', stats['loss'] / save_every, steps)
+                writer.add_scalar('match', stats['match'] / save_every, steps)
                 writer.flush()
+                logging.info(
+                    f'[DISTILL] step {steps:,} | loss={stats["loss"] / save_every:.4f} '
+                    f'| teacher-match={stats["match"] / save_every:.4f}'
+                )
                 for k in stats:
                     stats[k] = 0
                 state = {
@@ -229,7 +237,7 @@ def train():
                 break
         pb.close()
 
-    stats = {'loss': 0}
+    stats = {'loss': 0, 'match': 0}
     while steps < max_steps:
         train_epoch()
         gc.collect()
