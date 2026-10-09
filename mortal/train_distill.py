@@ -190,6 +190,8 @@ def train():
             batch_size=batch_size,
             drop_last=False,
             num_workers=num_workers,
+            pin_memory=True,
+            prefetch_factor=8,
             worker_init_fn=worker_init_fn,
         ))
 
