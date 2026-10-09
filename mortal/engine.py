@@ -52,6 +52,12 @@ class MortalEngine:
         self.rayon_threads = rayon_threads
         self.record_mode = record_mode
         self.review_policy_tau = review_policy_tau
+        # ── oracle 侧信道容器（main 的引擎有这一行, 合并时被丢掉 → 还原）──
+        # 不还原会让 mortal_review_server 的 engine.oracle_log.clear() /
+        # `oracle_flat = engine.oracle_log` 直接 AttributeError。
+        # 本分支没有 oracle 头 → 它永远是空列表; 复盘侧对空列表天然兼容
+        # (`if oracle_flat:` 为假 → 跳过), 读牌数据由 value_dist 兜底。
+        self.oracle_log = []
 
     def react_batch(self, obs, masks, invisible_obs):
         try:
