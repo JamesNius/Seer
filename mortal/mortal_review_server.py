@@ -22,6 +22,7 @@ import threading
 import sys
 import time
 import traceback
+import inspect
 import warnings
 from contextlib import nullcontext
 from datetime import datetime, timezone
@@ -29,7 +30,7 @@ from datetime import datetime, timezone
 import numpy as np
 import torch
 import orjson  # 快速 JSON(Pass 3 热路径)
-from model import Brain, DQN, GRP, OracleNet
+from model import Brain, DQN, GRP, OracleNet, CategoricalPolicy
 from engine import MortalEngine
 from value_dist.infer import load_predictor
 from libriichi.mjai import Bot
@@ -292,17 +293,24 @@ class MortalReviewServer:
                 # 直接用模型名做 tag(Seer->Seer, SeerX->SeerX), 不再自动生成 mortal4-...架构标签
                 tag = name
 
+            # ── 兼容两种模型: 老(DQN + BatchNorm) / 新(policy + GroupNorm) ──
+            # 用存档 key 区分: 老 = current_dqn, 新 = policy_net
+            is_policy = "policy_net" in state
+            norm = "GN" if is_policy else "BN"
             brain = Brain(
-                version=version, num_blocks=num_blocks, conv_channels=conv_channels
+                version=version, num_blocks=num_blocks, conv_channels=conv_channels, Norm=norm
             ).eval()
-            dqn = DQN(version=version).eval()
             brain.load_state_dict(state["mortal"])
-            dqn.load_state_dict(state["current_dqn"])
+            if is_policy:
+                # policy 模型: head 直接输出 π → 交给引擎转成 τ·log(π),
+                # 复盘侧 softmax(q/τ) 就能精确还原 π, rating / 恶手率自动兼容。
+                head = CategoricalPolicy().eval()
+                head.load_state_dict(state["policy_net"])
+            else:
+                head = DQN(version=version).eval()
+                head.load_state_dict(state["current_dqn"])
 
-            engine = MortalEngine(
-                brain,
-                dqn,
-                oracle_net=oracle_net,
+            engine_kwargs = dict(
                 version=version,
                 is_oracle=False,
                 device=self.device,
@@ -312,6 +320,14 @@ class MortalReviewServer:
                 name=name,
                 rayon_threads=config.get("review", {}).get("rayon_threads"),
             )
+            if is_policy:
+                # 与 seer-mortal 主程序里的 temperature = 0.1 保持一致
+                engine_kwargs["review_policy_tau"] = 0.1
+            # 合并后的引擎不再接受 oracle_net → 只在引擎支持时才传(老分支兼容)
+            if "oracle_net" in inspect.signature(MortalEngine.__init__).parameters:
+                engine_kwargs["oracle_net"] = oracle_net
+
+            engine = MortalEngine(brain, head, **engine_kwargs)
             self.engines[name] = engine
             self.tags[name] = tag
             logging.info(f"Model [{name}] loaded from {state_file} (tag={tag})")

@@ -26,6 +26,13 @@ class MortalEngine:
         # mortal_review_server.py 会传 rayon_threads → 不补回会 TypeError。
         rayon_threads = None,
         record_mode = False,
+        # ── 复盘兼容: policy(π) 模型 ──────────────────────────────────
+        # 复盘(Rust)侧把 q_value 当"分数", 用 prob = softmax(q_value / τ), τ=0.1。
+        # policy 模型的原始输出是 π(概率), 直接传过去 prob 会算错。
+        # review_policy_tau 不为 None 时, 返回 τ·log(π):
+        #     prob = softmax(τ·logπ / τ) = softmax(log π) = π    ← 精确还原
+        # 训练/自对弈必须保持原始 π(要按 π 采样) → 默认 None(不转换)。
+        review_policy_tau = None,
     ):
         self.engine_type = 'mortal'
         self.device = device or torch.device('cpu')
@@ -44,6 +51,7 @@ class MortalEngine:
         # ── restore #6 ──
         self.rayon_threads = rayon_threads
         self.record_mode = record_mode
+        self.review_policy_tau = review_policy_tau
 
     def react_batch(self, obs, masks, invisible_obs):
         try:
@@ -80,6 +88,10 @@ class MortalEngine:
         else:
             is_greedy = torch.ones(batch_size, dtype=torch.bool, device=self.device)
             actions = q_out.argmax(-1)
+
+        if self.review_policy_tau is not None:
+            # policy 模型: 转成 τ·log(π), 让复盘侧 softmax(q/τ) 精确还原 π
+            q_out = self.review_policy_tau * torch.log(q_out.clamp_min(1e-12))
 
         return actions.tolist(), q_out.tolist(), masks.tolist(), is_greedy.tolist()
 
