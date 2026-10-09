@@ -19,6 +19,13 @@ class MortalEngine:
         enable_rule_based_agari_guard = False,
         name = 'NoName',
         explore_rate = 0,
+        # ── restore #6: 补回被合并丢掉的参数 ──
+        # Rust 端 (libriichi/src/agent/mortal.rs) 构造 Bot 时会读这两个属性:
+        #   record_mode  : Pass1 录制模式(set_scene 编码但 get_reaction 不 evaluate)
+        #   rayon_threads: 编码线程池大小(None=自动核数)
+        # mortal_review_server.py 会传 rayon_threads → 不补回会 TypeError。
+        rayon_threads = None,
+        record_mode = False,
     ):
         self.engine_type = 'mortal'
         self.device = device or torch.device('cpu')
@@ -34,6 +41,9 @@ class MortalEngine:
         self.enable_rule_based_agari_guard = enable_rule_based_agari_guard
         self.name = name
         self.explore_rate = explore_rate
+        # ── restore #6 ──
+        self.rayon_threads = rayon_threads
+        self.record_mode = record_mode
 
     def react_batch(self, obs, masks, invisible_obs):
         try:
