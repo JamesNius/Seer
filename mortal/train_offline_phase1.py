@@ -117,6 +117,20 @@ def train():
         if not online or state['config']['control']['online']:
             optimizer.load_state_dict(state['optimizer'])
             scheduler.load_state_dict(state['scheduler'])
+            # ── restore #2: 恢复 config 的 scheduler 超参 ──────────────────
+            # load_state_dict 会把 checkpoint 里的旧超参(max_steps/final/peak 等)
+            # 和旧 lambda 一起灌回来, 覆盖按当前 config 构造的新曲线。
+            # 这里恢复 config 的超参 + 装回新 lambda, 再用当前 step 重算 LR。
+            sched_cfg = config['optim']['scheduler']
+            for k in ('init', 'peak', 'final', 'warm_up_steps', 'max_steps', 'offset', 'epoch_size'):
+                if k in sched_cfg:
+                    setattr(scheduler, k, sched_cfg[k])
+            scheduler.lr_lambdas = [scheduler._step_inner for _ in scheduler.optimizer.param_groups]
+            # max_steps=0 表示恒在 peak; 否则把余弦从当前 step 重新起坡, 用满剩余步数。
+            cur_step = scheduler.last_epoch
+            scheduler.warm_up_steps = cur_step
+            scheduler.max_steps = cur_step + (sched_cfg['max_steps'] - cur_step)
+            scheduler.step(cur_step)
             if 'shared_stats' in state and state['shared_stats'] is not None:
                 shared_stats['count'].value = state['shared_stats']['count']
                 shared_stats['mean'].value = state['shared_stats']['mean']
