@@ -1,7 +1,7 @@
 [control]
 version = 4
 online = false
-state_file = 'checkpoints/SeerPolicy.pth'
+state_file = 'checkpoints/SeerX_online.pth'
 best_state_file = 'checkpoints/best_SeerPolicy.pth'
 tensorboard_dir = 'runs'
 device = 'cuda'
@@ -39,8 +39,15 @@ rayon_threads = 12
 # SeerX = 'checkpoints/SeerX1.0bug修复版.pth'    SeerX = 'checkpoints/Seer2.0.pth' 
 # Seer = 'checkpoints/seer.1.0.收敛版.pth'
 [review.models]
-Seer = 'checkpoints/Seer2.0.pth'
-SeerX = 'checkpoints/SeerX1.0bug修复版.pth'
+# 拼接模型：早盘/深巡走 SeerX，其余走 Seer1.0（V5 配置）
+# 键名含点，TOML 必须加引号，否则会被解析成子表
+[review.models."SeerX2.0"]
+early       = 'checkpoints/SeerX1.0bug修复版.pth'
+late        = 'checkpoints/seer.1.0.收敛版.pth'
+gate_mode   = 'early'
+gate_turn   = 6
+late_from   = 13
+base        = 'v3'
 
 [env]
 gamma = 1.0
@@ -84,6 +91,28 @@ max_steps = 0
 # PG 训练 (train_offline_phase1.py / train_online.py) 专用
 awr_beta = 1.0
 awr_clip = 100
+# train_online.py(PPO) 用: 之前缺失导致 KeyError
+entropy_weight = 1e-3
+clip_ratio = 0.2
+dual_clip = 3.0
+
+[ach]
+# ===== train_ach.py 专用: ACH (Actor-Critic Hedge, 腾讯 ICLR 2022, LuckyJ 同族) =====
+# 更新律 = KL(π_θ ‖ Hedge(A⁺));  A(s,a)=Q(s,a)-E_π[Q];  只奖励正 regret。
+# 热启动: 从 seed_state_file (蒸馏产物) 加载 brain+actor, critic 随机初始化。
+seed_state_file = 'checkpoints/SeerPolicy.pth'      # 起点种子 (蒸馏的 policy 头)
+ach_state_file  = 'checkpoints/SeerACH.pth'         # ACH 自己的输出 (断点续训源)
+best_state_file = 'checkpoints/SeerACH_best.pth'
+eta = 0.15          # Hedge 步长初值 (Z 标准化后 adv ~ 单位尺度, 0.15 给出合理倾斜)
+eta_final = 0.05    # 退火终值 (别退到 0.02: 那样 ~9 万步下来约等于没动)
+max_steps = 100000  # ACH 总步数 (>0 覆盖 scheduler.max_steps → 启用 eta 退火 + 到点停)。
+                    # 100k 与蒸馏同步数, 便于"ACH vs 蒸馏"同预算对比。1 epoch 全量 ≈165 万步。
+critic_weight = 0.5 # critic MSE 的权重
+adv_norm = true     # ★ advantage 批内标准化: 固定 clamp 会让正 regret 只剩 argmax 一项 → 信号≈0
+critic_warmup_max = 30000    # ★ 自适应预热上限: c_loss 收敛才解冻 actor (不用固定步数一刀切)
+critic_warmup_ratio = 0.6    # c_loss 降到基准的 60% → 解冻 actor
+only_positive = true
+adv_clamp = 3.0     # 标准化(adv_norm=true)后的 clamp: ±3σ, 离群点截断
 
 [distill]
 # train_distill.py 专用: 把 value-based 教师蒸馏进 policy 学生(给 AWR 一个好起点)
@@ -155,6 +184,10 @@ boltzmann_epsilon = 0.005  # 探索参数, 官方示例值
 boltzmann_temp = 0.05
 top_p = 1.0
 repeats = 1
+# 受训体探索率: engine.py:91 → >0 时按 bernoulli(1-explore_rate) 决定每步"贪心 or 从策略采样"。
+#   1.0 = 每步都从策略采样(官方 config.example.toml 的默认值); 0 = 纯贪心 argmax。
+#   ACH 需要探索覆盖, 用 1.0。client.py → TrainPlayer.__init__ 读取此键, 缺失会 KeyError。
+explore_rate = 1.0
 
 [online.remote]
 host = '127.0.0.1'
@@ -168,15 +201,15 @@ force_sequential = true    # 单 GPU 必须 true: 训练时 client 等待, 避�
 # 注: example 里的 sample_reuse_rate/threshold 是死字段, 代码从未读取, 勿依赖
 
 [1v3]
-seed_key = -1
+seed_key = 20261011        # 固定 seed → 配对可复现(配对比较降方差)
 games_per_iter = 2000
-iters = 500
+iters = 1                  # 单轮 2000 局筛查(可辨 >=3pt); 要更细改大
 log_dir = '1v3_logs'
 
 [1v3.challenger]
 device = 'cuda'
-name = 'mortal'
-state_file = 'checkpoints/SeerX1.0bug修复版.pth'
+name = 'SeerACHv2online'
+state_file = 'checkpoints/SeerACH_v2_online.pth'   # 在线自对弈 v2 权重(2026-10-14 由 SeerACH.pth 改)
 stochastic_latent = false
 enable_compile = false
 enable_amp = true
@@ -185,7 +218,7 @@ enable_rule_based_agari_guard = true
 [1v3.champion]
 device = 'cuda'
 name = 'baseline'
-state_file = 'checkpoints/seer.1.0.收敛版.pth'
+state_file = 'checkpoints/seer.1.0.收敛版.pth'   # 我们的 1.0(BN + DQN) —— 唯一锚点
 stochastic_latent = false
 enable_compile = false
 enable_amp = true

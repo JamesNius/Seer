@@ -36,6 +36,8 @@ try:
 except ImportError:
     OracleNet = None
 from engine import MortalEngine
+from hybrid_engine import HybridEngine   # 拼接模型（early/late 两个权重）
+from model_loader import load_checkpoint   # torch.load 包装: weights_only 失败自动回退
 from value_dist.infer import load_predictor
 from libriichi.mjai import Bot
 from libriichi.dataset import Grp
@@ -255,9 +257,8 @@ class MortalReviewServer:
             oracle_state_file = config["review"].get(
                 "oracle_state_file", config["control"]["state_file"]
             )
-            oracle_state = torch.load(
+            oracle_state = load_checkpoint(
                 oracle_state_file,
-                weights_only=True,
                 map_location=self.device,
             )
             oracle_net = OracleNet(
@@ -268,9 +269,8 @@ class MortalReviewServer:
 
         # GRP 模型（用于 phi_matrix，共享一份）
         grp = GRP(**config["grp"]["network"])
-        grp_state = torch.load(
+        grp_state = load_checkpoint(
             config["grp"]["state_file"],
-            weights_only=True,
             map_location=self.device,
         )
         grp.load_state_dict(grp_state["model"])
@@ -289,8 +289,20 @@ class MortalReviewServer:
         if not models_cfg:
             # 兼容旧配置：无 [review.models] 时回退到单模型
             models_cfg = {"Seer": config["control"]["state_file"]}
-        for name, state_file in models_cfg.items():
-            state = torch.load(state_file, weights_only=True, map_location=self.device)
+        # 拼接模型（[review.models."xxx"] 写成表）：先拆成两个单模型条目，
+        # 循环结束后再包成 HybridEngine —— 这样下面这段加载逻辑完全不用动。
+        flat = {}
+        hybrid_plan = {}
+        for _n, _spec in models_cfg.items():
+            if isinstance(_spec, dict):
+                flat[_n + "::early"] = _spec["early"]
+                flat[_n + "::late"] = _spec["late"]
+                hybrid_plan[_n] = _spec
+            else:
+                flat[_n] = _spec
+
+        for name, state_file in flat.items():
+            state = load_checkpoint(state_file, map_location=self.device)
             cfg = state["config"]
             version = cfg["control"].get("version", 1)
             num_blocks = cfg["resnet"]["num_blocks"]
@@ -330,8 +342,19 @@ class MortalReviewServer:
                 rayon_threads=config.get("review", {}).get("rayon_threads"),
             )
             if is_policy:
-                # 与 seer-mortal 主程序里的 temperature = 0.1 保持一致
-                engine_kwargs["review_policy_tau"] = 0.1
+                # policy 模型: 让复盘侧显示的概率严格等于真实 π。
+                #
+                # 链路: 这里发 q = review_policy_tau · log(π);
+                #       seer-mortal 会再乘 Q_DISPLAY_SCALE(=0.2, 见 seer-mortal/src/mortal.rs:20),
+                #       最后算 prob = softmax(q_scaled / temperature), temperature=0.1。
+                #   ⇒ prob = softmax(0.2·τ·logπ / 0.1) = π^(2τ)
+                #   要得到 prob = π 必须 2τ = 1, 即 τ = 0.5。
+                #
+                # 历史 bug: 原来这里写 0.1, 得到 prob = π^0.2 —— 分布被严重压平
+                # (实测熵 0.233 → 1.669, top1 0.912 → 0.451), argmax 不变所以 rating/一致率看不出来。
+                # 若日后改 Q_DISPLAY_SCALE, 这里的 1/0.2 必须同步改。
+                REVIEW_Q_DISPLAY_SCALE = 0.2   # 与 seer-mortal/src/mortal.rs 的 Q_DISPLAY_SCALE 保持一致
+                engine_kwargs["review_policy_tau"] = 0.1 / REVIEW_Q_DISPLAY_SCALE
             # 合并后的引擎不再接受 oracle_net → 只在引擎支持时才传(老分支兼容)
             if "oracle_net" in inspect.signature(MortalEngine.__init__).parameters:
                 engine_kwargs["oracle_net"] = oracle_net
@@ -340,6 +363,23 @@ class MortalReviewServer:
             self.engines[name] = engine
             self.tags[name] = tag
             logging.info(f"Model [{name}] loaded from {state_file} (tag={tag})")
+
+        # 把 ::early / ::late 两半包成拼接引擎
+        for _n, _spec in hybrid_plan.items():
+            _e = self.engines.pop(_n + "::early")
+            _l = self.engines.pop(_n + "::late")
+            self.tags.pop(_n + "::early", None)
+            self.tags.pop(_n + "::late", None)
+            self.engines[_n] = HybridEngine(
+                _e, _l,
+                gate_turn=int(_spec.get("gate_turn", 6)),
+                mode=_spec.get("gate_mode", "early"),
+                late_from=int(_spec.get("late_from", 0)),
+                base=_spec.get("base", "v3"),
+                name=_n,
+            )
+            self.tags[_n] = _n
+            logging.info(f"Hybrid model [{_n}] early={_spec['early']} late={_spec['late']}")
 
         logging.info(f"Mortal models loaded. engines={list(self.engines.keys())}")
 
@@ -378,7 +418,14 @@ class MortalReviewServer:
                 raise ValueError(f"Invalid player_id: {player_id}")
             model = parts[1] if len(parts) > 1 else "Seer"
             if model not in self.engines:
-                raise ValueError(f"Unknown model: {model} (available: {list(self.engines.keys())})")
+                # 兼容旧客户端（浏览器缓存的旧入口页 / 旧脚本发 'Seer'/'SeerX'）：
+                # 只配了一个引擎时直接用它，不再报错。
+                if len(self.engines) == 1:
+                    _only = next(iter(self.engines))
+                    logging.info(f"model '{model}' 不在 engines，回退到唯一引擎 '{_only}'")
+                    model = _only
+                else:
+                    raise ValueError(f"Unknown model: {model} (available: {list(self.engines.keys())})")
             engine = self.engines[model]
 
             all_lines = [ln.strip() for ln in rf if ln.strip()]

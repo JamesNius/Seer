@@ -19,6 +19,7 @@
 """
 
 import argparse
+import inspect
 import logging
 import os
 import sys
@@ -37,6 +38,7 @@ if _HERE not in sys.path:
 
 from model import Brain, DQN          # noqa: E402
 from engine import MortalEngine       # noqa: E402
+from hybrid_engine import HybridEngine  # noqa: E402  拼接模型（早/晚两个权重）
 from config import config             # noqa: E402
 from libriichi.mjai import Bot        # noqa: E402
 
@@ -151,10 +153,31 @@ class TenhouReactServer:
         self._bot_n = 0         # Bot 已处理的事件数
         log.info(f"引擎加载完成: {model_name} (device={self.device})")
 
-    def _load_engine(self, model_name: str) -> MortalEngine:
-        """加载指定模型的 Brain+DQN，返回 MortalEngine。"""
+    def _load_engine(self, model_name: str):
+        """按 [review.models] 加载。
+
+        值是字符串 -> 单模型（原行为，逐位不变）。
+        值是表     -> 拼接模型：early/late 两个权重，按 obs 内的巡目/立直/南4 逐样本路由。
+        """
         models_cfg = config.get("review", {}).get("models", {})
-        state_file = models_cfg.get(model_name)
+        spec = models_cfg.get(model_name)
+        if isinstance(spec, dict):
+            early = self._load_single(spec["early"], f"{model_name}:early")
+            late = self._load_single(spec["late"], f"{model_name}:late")
+            eng = HybridEngine(
+                early, late,
+                gate_turn=int(spec.get("gate_turn", 6)),
+                mode=spec.get("gate_mode", "early"),
+                late_from=int(spec.get("late_from", 0)),
+                base=spec.get("base", "v3"),
+                name=model_name,
+            )
+            log.info(f"拼接引擎 {eng.name}: early={spec['early']} late={spec['late']}")
+            return eng
+        return self._load_single(spec, model_name)
+
+    def _load_single(self, state_file, model_name: str) -> MortalEngine:
+        """加载单个 Brain+DQN，返回 MortalEngine。"""
         if not state_file:
             # 兼容：没有 [review.models] 时回退到 control.state_file
             state_file = config["control"]["state_file"]
@@ -173,11 +196,20 @@ class TenhouReactServer:
         brain.load_state_dict(state["mortal"])
         dqn.load_state_dict(state["current_dqn"])
 
-        engine = MortalEngine(
-            brain, dqn, oracle_net=None, version=version, is_oracle=False,
-            device=self.device, enable_amp=False, enable_quick_eval=False,
-            enable_rule_based_agari_guard=True, name=model_name,
+        # 合并后的引擎不再接受 oracle_net（OracleNet 头已移除，见 0016cdc）。
+        # 与 mortal_review_server.py 保持一致：只在引擎签名支持时才传，兼容旧分支。
+        engine_kwargs = dict(
+            version=version,
+            is_oracle=False,
+            device=self.device,
+            enable_amp=False,
+            enable_quick_eval=False,
+            enable_rule_based_agari_guard=True,
+            name=model_name,
         )
+        if "oracle_net" in inspect.signature(MortalEngine.__init__).parameters:
+            engine_kwargs["oracle_net"] = None
+        engine = MortalEngine(brain, dqn, **engine_kwargs)
         log.info(f"模型 {model_name} 加载耗时 {time.time()-t0:.2f}s "
                  f"(version={version}, blocks={num_blocks}, ch={conv_channels})")
         return engine
@@ -241,55 +273,7 @@ class TenhouReactServer:
         if mask_bits is not None and mask_bits.bit_count() <= 1:
             return None
 
-        # 修正 tsumogiri: libriichi Bot 只按"切牌==刚摸牌"判摸切, 没考虑
-        # 手牌里(不含副露)是否也有同张。若手里还有同张, 切这张可能是手切(打手里的),
-        # 应标 false。赤5 天然保护: 赤5 只有一张, 摸赤5打赤5 手牌无同张 → 仍摸切。
-        self._fix_tsumogiri(player_id, events, reaction)
         return reaction
-
-    def _fix_tsumogiri(self, player_id: int, events: List[dict], reaction: dict) -> None:
-        """重建自家手牌(不含副露), 修正 dahai 的 tsumogiri。原地修改 reaction。"""
-        if reaction.get("type") != "dahai":
-            return
-        pai = reaction.get("pai")
-        if not pai:
-            return
-        # 从 events 重建自家手牌(不含副露) + 最近一次自家摸的牌
-        hand: list = []          # 当前手牌(不含副露, 不含刚摸的)
-        last_tsumo = None        # 最近一次自家摸的牌
-        for ev in events:
-            t = ev.get("type")
-            actor = ev.get("actor")
-            if t == "start_kyoku":
-                tehais = ev.get("tehais") or []
-                if 0 <= player_id < len(tehais):
-                    hand = list(tehais[player_id])
-                last_tsumo = None
-            elif actor == player_id:
-                if t == "tsumo":
-                    last_tsumo = ev.get("pai")
-                    # 刚摸的牌暂不进 hand, 单独用 last_tsumo 判断来源
-                elif t == "dahai":
-                    d = ev.get("pai")
-                    if d in hand:
-                        hand.remove(d)
-                    last_tsumo = None
-                elif t in ("pon", "chi", "daiminkan", "ankan", "kakan"):
-                    # 副露: consumed + pai 离开手牌
-                    consumed = ev.get("consumed") or []
-                    for c in consumed:
-                        if c in hand:
-                            hand.remove(c)
-                    p = ev.get("pai")
-                    if p in hand:
-                        hand.remove(p)
-                    last_tsumo = None
-        # 判定: 切的牌 == 刚摸的牌, 且手牌里(不含刚摸)还有同张 → 可能是手切(打手里的)
-        if last_tsumo is not None and pai == last_tsumo:
-            if pai in hand:
-                reaction["tsumogiri"] = False
-            else:
-                reaction["tsumogiri"] = True
 
     @staticmethod
     def _kyoku_key(player_id: int, events: List[dict]) -> tuple:
